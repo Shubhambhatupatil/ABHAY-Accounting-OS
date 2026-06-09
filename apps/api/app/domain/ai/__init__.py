@@ -1,0 +1,2 @@
+"""ABHAY AI Accountant domain."""
+

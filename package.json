@@ -1,0 +1,19 @@
+{
+  "name": "abhay-accounting-os",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "build": "npm --workspace apps/web run build",
+    "lint": "npm --workspace apps/web run lint",
+    "test": "npm --workspace apps/web run test",
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:api": "cd apps/api && python -m uvicorn app.main:app --reload"
+  },
+  "devDependencies": {
+    "@next/swc-wasm-nodejs": "^15.5.19",
+    "next": "^15.5.19"
+  }
+}

@@ -1,0 +1,2 @@
+"""Hyper automation domain."""
+

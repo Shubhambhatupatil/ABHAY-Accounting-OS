@@ -167,6 +167,18 @@ export function AiWorkbench() {
 
   async function uploadPdf(file: File | null) {
     if (!file || !token || !companyId) return;
+    if (file.type.startsWith("image/")) {
+      setSuggestion(null);
+      setPosted(null);
+      setStatus("Image bill OCR is coming soon. Use text PDF or one-line entry for now.");
+      setStatusTone("info");
+      return;
+    }
+    if (file.type !== "application/pdf") {
+      setStatus("Currently supports text-based PDFs only. Scanned/image bills need OCR later.");
+      setStatusTone("error");
+      return;
+    }
     setIsBusy(true);
     setPosted(null);
     try {
@@ -295,10 +307,14 @@ export function AiWorkbench() {
 
             <div className="glass-card float-card p-4">
               <h2 className="mb-3 text-base font-semibold">PDF Bill Reader</h2>
+              <p className="mb-3 text-sm text-muted-foreground">
+                Currently supports text-based PDFs only. Scanned/image bills need OCR later.
+              </p>
               <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-orange-200 bg-orange-50/40 p-4 text-center text-sm text-muted-foreground transition hover:-translate-y-0.5 hover:bg-orange-50">
                 <Upload className="mb-2 text-primary" size={22} />
                 <span>Upload text PDF bill or invoice</span>
-                <input className="hidden" type="file" accept="application/pdf" onChange={(event) => void uploadPdf(event.target.files?.[0] ?? null)} />
+                <span className="mt-1 text-xs">Use one-line AI entry as fallback.</span>
+                <input className="hidden" type="file" accept="application/pdf,image/*" onChange={(event) => void uploadPdf(event.target.files?.[0] ?? null)} />
               </label>
             </div>
           </div>
@@ -342,13 +358,13 @@ export function AiWorkbench() {
               <PreviewPanel title="Debit/Credit Preview" rows={suggestion.suggestion.lines} />
               <div className="rounded-xl border border-white/70 bg-white/70 p-3">
                 <h3 className="mb-2 font-medium">GST Preview</h3>
-                {gstPreview.length ? gstPreview.map((line) => <LineRow key={line.ledger_name} line={line} />) : <p className="text-sm text-muted-foreground">No GST line detected.</p>}
+                {gstPreview.length ? gstPreview.map((line, index) => <LineRow key={`${index}-${line.ledger_name}`} line={line} />) : <p className="text-sm text-muted-foreground">No GST line detected.</p>}
               </div>
               <div className="rounded-xl border border-white/70 bg-white/70 p-3">
                 <h3 className="mb-2 font-medium">Review Notes</h3>
                 <p className="text-sm text-muted-foreground">{suggestion.suggestion.explanation}</p>
-                {suggestion.clarification_questions.map((question) => <p key={question} className="mt-2 rounded-md bg-muted p-2 text-sm">{question}</p>)}
-                {suggestion.suggestion.validation_errors.map((error) => <p key={error} className="mt-2 rounded-md bg-destructive/10 p-2 text-sm text-destructive">{error}</p>)}
+                {suggestion.clarification_questions.map((question, index) => <p key={`${index}-${question}`} className="mt-2 rounded-md bg-muted p-2 text-sm">{question}</p>)}
+                {suggestion.suggestion.validation_errors.map((error, index) => <p key={`${index}-${error}`} className="mt-2 rounded-md bg-destructive/10 p-2 text-sm text-destructive">{error}</p>)}
               </div>
             </div>
 
@@ -478,8 +494,8 @@ function RiskPanel({ title: panelTitle, items, empty }: { title: string; items: 
       <h3 className="mb-2 font-medium">{panelTitle}</h3>
       {items.length ? (
         <div className="space-y-2">
-          {items.map((item) => (
-            <p key={item} className="rounded-md bg-muted p-2 text-sm text-muted-foreground">{item}</p>
+          {items.map((item, index) => (
+            <p key={`${index}-${item}`} className="rounded-md bg-muted p-2 text-sm text-muted-foreground">{item}</p>
           ))}
         </div>
       ) : <p className="text-sm text-muted-foreground">{empty}</p>}
@@ -491,7 +507,7 @@ function PreviewPanel({ title: panelTitle, rows }: { title: string; rows: AiEntr
   return (
     <div className="rounded-xl border border-white/70 bg-white/70 p-3">
       <h3 className="mb-2 font-medium">{panelTitle}</h3>
-      <div className="space-y-2">{rows.map((line) => <LineRow key={`${line.ledger_name}-${line.debit}-${line.credit}`} line={line} />)}</div>
+      <div className="space-y-2">{rows.map((line, index) => <LineRow key={`${index}-${line.ledger_name}-${line.debit}-${line.credit}`} line={line} />)}</div>
     </div>
   );
 }

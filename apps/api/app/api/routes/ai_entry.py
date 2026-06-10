@@ -86,7 +86,7 @@ async def upload_pdf_entry(
     extracted_text = extract_text_from_pdf_bytes(pdf_bytes)
     invoice_fields = extract_invoice_fields(extracted_text)
     if not extracted_text.strip():
-        invoice_fields.extraction_warning = "This appears to be a scanned-image PDF. Text OCR is required before AI posting."
+        invoice_fields.extraction_warning = "Scanned/image PDF needs OCR. Please upload text PDF or enter details manually."
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=invoice_fields.extraction_warning,

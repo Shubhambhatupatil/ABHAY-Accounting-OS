@@ -162,14 +162,20 @@ def list_companies(
     try:
         companies = repo.list_companies(user_uuid(user))
         if not companies:
-            metadata = user.claims.get("user_metadata") or user.claims.get("raw_user_meta_data") or {}
-            company = repo.ensure_first_company(
-                user_uuid(user),
-                user.email,
-                metadata.get("full_name"),
-                metadata.get("initial_company_name") or metadata.get("company_name"),
-            )
-            companies = [company]
+            if user.id == "local-demo-owner":
+                result = repo.create_demo_company(user_uuid(user), user.email, "Local Demo Owner")
+                companies = repo.list_companies(user_uuid(user))
+                if not companies:
+                    raise RuntimeError(f"Demo company seed failed for {result.company_id}")
+            else:
+                metadata = user.claims.get("user_metadata") or user.claims.get("raw_user_meta_data") or {}
+                company = repo.ensure_first_company(
+                    user_uuid(user),
+                    user.email,
+                    metadata.get("full_name"),
+                    metadata.get("initial_company_name") or metadata.get("company_name"),
+                )
+                companies = [company]
         else:
             for company in companies:
                 repo.ensure_launch_ai_ledgers(company.id)

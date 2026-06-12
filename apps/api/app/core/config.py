@@ -1,9 +1,10 @@
 import json
 from functools import lru_cache
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import AnyHttpUrl, Field
 from pydantic import field_validator
+from pydantic_settings import NoDecode
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,7 +13,7 @@ class Settings(BaseSettings):
     supabase_url: AnyHttpUrl
     supabase_jwt_audience: str = "authenticated"
     database_url: str = Field(min_length=1)
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
     openai_api_key: str | None = None
     alpha_demo_mode: bool = False
 

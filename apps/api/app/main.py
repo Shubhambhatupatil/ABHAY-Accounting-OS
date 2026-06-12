@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,6 +12,13 @@ from app.api.routes.bank_reconciliation import router as bank_reconciliation_rou
 from app.api.routes.financial_intelligence import router as financial_intelligence_router
 from app.api.routes.automation import router as automation_router
 from app.core.config import get_settings
+from app.core.database import create_alpha_schema_if_needed
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    create_alpha_schema_if_needed()
+    yield
 
 
 def create_app() -> FastAPI:
@@ -18,6 +28,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url="/docs" if settings.app_env != "production" else None,
         redoc_url=None,
+        lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,

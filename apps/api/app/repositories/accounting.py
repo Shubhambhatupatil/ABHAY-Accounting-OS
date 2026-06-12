@@ -1130,7 +1130,7 @@ class AccountingRepository:
                 on conflict (id) do nothing
                 """
             ),
-            {"id": user_id, "email": safe_email, "full_name": safe_name},
+            {"id": str(user_id), "email": safe_email, "full_name": safe_name},
         )
         self.insert_profile_identity(user_id, safe_name)
         self.db.commit()
@@ -1144,5 +1144,5 @@ class AccountingRepository:
                 on conflict (id) do nothing
                 """
             ),
-            {"id": user_id, "full_name": full_name},
+            {"id": str(user_id), "full_name": full_name},
         )

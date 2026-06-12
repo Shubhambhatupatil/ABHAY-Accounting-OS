@@ -3,11 +3,12 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+UUID = Uuid
 
 
 class AccountNature(str, enum.Enum):
@@ -99,6 +100,13 @@ class Company(Base):
     gstin: Mapped[str | None] = mapped_column(String(15))
     state_code: Mapped[str | None] = mapped_column(String(2))
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+
+
+class Profile(Base):
+    __tablename__ = "profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    full_name: Mapped[str] = mapped_column(Text)
 
 
 class Role(Base):
@@ -207,7 +215,7 @@ class VoucherAuditEvent(Base):
     voucher_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     event_type: Mapped[str] = mapped_column(Text)
-    event_payload: Mapped[dict] = mapped_column(JSONB)
+    event_payload: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -347,8 +355,8 @@ class AiSuggestion(Base):
         Enum(AiSuggestionStatus, name="ai_suggestion_status")
     )
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    proposed_payload: Mapped[dict] = mapped_column(JSONB)
-    validation_errors: Mapped[list] = mapped_column(JSONB)
+    proposed_payload: Mapped[dict] = mapped_column(JSON)
+    validation_errors: Mapped[list] = mapped_column(JSON)
     approved_voucher_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     model_name: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -362,6 +370,6 @@ class AiFeedbackExample(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"))
     ai_suggestion_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("ai_suggestions.id"))
-    corrected_payload: Mapped[dict] = mapped_column(JSONB)
+    corrected_payload: Mapped[dict] = mapped_column(JSON)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

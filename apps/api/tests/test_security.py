@@ -20,7 +20,7 @@ def test_invalid_token_is_rejected() -> None:
     assert exc_info.value.status_code == 401
 
 
-def test_local_demo_token_is_accepted_only_in_local_env() -> None:
+def test_local_demo_token_is_accepted_in_local_env() -> None:
     settings = Settings(
         app_env="local",
         supabase_url="https://example.supabase.co",
@@ -35,7 +35,7 @@ def test_local_demo_token_is_accepted_only_in_local_env() -> None:
     assert user.role == "owner"
 
 
-def test_demo_token_is_rejected_outside_local_env() -> None:
+def test_demo_token_is_accepted_for_hosted_alpha_outside_local_env() -> None:
     settings = Settings(
         app_env="production",
         supabase_url="https://example.supabase.co",
@@ -43,10 +43,11 @@ def test_demo_token_is_rejected_outside_local_env() -> None:
     )
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=LOCAL_DEMO_TOKEN)
 
-    with pytest.raises(HTTPException) as exc_info:
-        require_user(credentials=credentials, settings=settings)
+    user = require_user(credentials=credentials, settings=settings)
 
-    assert exc_info.value.status_code == 401
+    assert user.id == "local-demo-owner"
+    assert user.email == "demo@abhay.test"
+    assert user.role == "owner"
 
 
 def test_local_demo_session_verify_response() -> None:

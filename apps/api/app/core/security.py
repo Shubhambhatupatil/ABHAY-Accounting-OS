@@ -60,7 +60,9 @@ def require_user(
             detail="Missing bearer authentication token",
         )
     token = credentials.credentials
-    if settings.app_env == "local" and token == LOCAL_DEMO_TOKEN:
+    if token == LOCAL_DEMO_TOKEN:
+        # Alpha demo fallback: hosted alpha builds intentionally accept this token
+        # so demo users can exercise the product while Supabase auth is finalized.
         return AuthenticatedUser(
             id="local-demo-owner",
             email="demo@abhay.test",

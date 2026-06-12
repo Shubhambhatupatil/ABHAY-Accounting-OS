@@ -5,13 +5,13 @@
   "workspaces": [
     "apps/web"
   ],
- "scripts": {
-  "dev": "next dev",
-  "build": "next build",
-  "start": "next start",
-  "lint": "eslint . --max-warnings=0",
-  "test": "tsc --noEmit"
-},
+  "scripts": {
+    "dev": "npm --workspace apps/web run dev",
+    "build": "npm --workspace apps/web run build",
+    "start": "npm --workspace apps/web run start",
+    "lint": "npm --workspace apps/web run lint",
+    "test": "npm --workspace apps/web run test"
+  },
   "devDependencies": {
     "@next/swc-wasm-nodejs": "^15.5.19",
     "next": "^15.5.19"

@@ -16,3 +16,7 @@ work/*.log
 *.tsbuildinfo
 *.egg-info/
 work/
+.vercel
+.env
+.env.local
+.env.*.local

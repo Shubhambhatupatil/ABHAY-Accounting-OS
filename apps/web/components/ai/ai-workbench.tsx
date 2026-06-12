@@ -170,12 +170,12 @@ export function AiWorkbench() {
     if (file.type.startsWith("image/")) {
       setSuggestion(null);
       setPosted(null);
-      setStatus("Image bill OCR is coming soon. Use text PDF or one-line entry for now.");
+      setStatus("Image/scanned OCR is coming soon. Use text PDF or one-line entry for now.");
       setStatusTone("info");
       return;
     }
     if (file.type !== "application/pdf") {
-      setStatus("Currently supports text-based PDFs only. Scanned/image bills need OCR later.");
+      setStatus("Image/scanned OCR is coming soon. Use text PDF or one-line entry for now.");
       setStatusTone("error");
       return;
     }
@@ -308,7 +308,7 @@ export function AiWorkbench() {
             <div className="glass-card float-card p-4">
               <h2 className="mb-3 text-base font-semibold">PDF Bill Reader</h2>
               <p className="mb-3 text-sm text-muted-foreground">
-                Currently supports text-based PDFs only. Scanned/image bills need OCR later.
+                Alpha supports text PDFs only. Image/scanned OCR is coming soon. Use text PDF or one-line entry for now.
               </p>
               <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-orange-200 bg-orange-50/40 p-4 text-center text-sm text-muted-foreground transition hover:-translate-y-0.5 hover:bg-orange-50">
                 <Upload className="mb-2 text-primary" size={22} />

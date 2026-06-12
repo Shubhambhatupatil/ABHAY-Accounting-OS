@@ -28,6 +28,8 @@ def get_jwk_client(jwks_url: str) -> PyJWKClient:
 
 def decode_supabase_token(token: str, settings: Settings) -> AuthenticatedUser:
     try:
+        # TODO(production-auth): restore Supabase JWT signature and audience verification
+        # before removing Alpha Demo Mode.
         claims = jwt.decode(
             token,
             options={
@@ -60,9 +62,9 @@ def require_user(
             detail="Missing bearer authentication token",
         )
     token = credentials.credentials
-    if token == LOCAL_DEMO_TOKEN:
+    if token == LOCAL_DEMO_TOKEN and (settings.app_env == "local" or settings.alpha_demo_mode):
         # Alpha demo fallback: hosted alpha builds intentionally accept this token
-        # so demo users can exercise the product while Supabase auth is finalized.
+        # only when ALPHA_DEMO_MODE is enabled, while Supabase auth is finalized.
         return AuthenticatedUser(
             id="local-demo-owner",
             email="demo@abhay.test",

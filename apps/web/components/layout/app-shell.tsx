@@ -9,13 +9,14 @@ import {
   FileText,
   Gauge,
   Landmark,
+  LogOut,
   Menu,
   Sparkles,
   TrendingUp,
   X
 } from "lucide-react";
 import { accountingApi } from "@/lib/api/accounting";
-import { getAccessToken } from "@/lib/auth/demo-auth";
+import { clearLocalDemoSession, getAccessToken, getLocalDemoToken, isAlphaDemoModeEnabled } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,8 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const alphaDemoMode = isAlphaDemoModeEnabled();
+  const isDemoSession = Boolean(getLocalDemoToken());
 
   async function createDemoCompany() {
     setIsBusy(true);
@@ -63,13 +66,31 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
     }
   }
 
+  async function logout() {
+    setIsBusy(true);
+    setStatus("");
+    try {
+      await supabase.auth.signOut();
+      clearLocalDemoSession();
+      router.replace("/login");
+      router.refresh();
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   return (
     <div className="abhay-shell-bg min-h-screen lg:grid lg:grid-cols-[292px_1fr]">
       <header className="sticky top-0 z-30 m-3 flex items-center justify-between rounded-2xl border border-white/70 bg-white/80 px-3 py-3 shadow-lg backdrop-blur-xl lg:hidden">
         <Brand />
-        <Button type="button" variant="secondary" onClick={() => setIsOpen(true)} title="Open navigation">
-          <Menu size={18} />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="secondary" onClick={logout} title="Logout" disabled={isBusy}>
+            <LogOut size={18} />
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => setIsOpen(true)} title="Open navigation">
+            <Menu size={18} />
+          </Button>
+        </div>
       </header>
       <aside
         className={cn(
@@ -85,6 +106,11 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
             </Button>
           </div>
           <span className="ai-badge mb-5 w-fit">AI Accounting Alpha</span>
+          {alphaDemoMode || isDemoSession ? (
+            <p className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+              Alpha Demo Mode {isDemoSession ? "active" : "available"}
+            </p>
+          ) : null}
           <nav className="space-y-1.5">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -116,6 +142,10 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
               Create demo
             </Button>
             {status ? <p className="mt-2 text-xs text-muted-foreground">{status}</p> : null}
+            <Button className="mt-3 w-full" type="button" variant="secondary" onClick={logout} disabled={isBusy}>
+              <LogOut size={17} />
+              Logout
+            </Button>
           </div>
         </div>
       </aside>

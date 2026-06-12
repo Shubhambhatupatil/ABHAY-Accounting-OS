@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { accountingApi } from "@/lib/api/accounting";
 import { verifyApiSession } from "@/lib/api/auth";
-import { ensureLocalDemoSession, isPlaceholderSupabaseConfig } from "@/lib/auth/demo-auth";
+import { ensureLocalDemoSession, isAlphaDemoFallbackAllowed, isAlphaDemoModeEnabled } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 
 type AuthMode = "login" | "signup";
@@ -23,7 +23,8 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isSignup = mode === "signup";
-  const canUseLocalDemo = isPlaceholderSupabaseConfig();
+  const canUseLocalDemo = isAlphaDemoFallbackAllowed();
+  const alphaDemoMode = isAlphaDemoModeEnabled();
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -71,13 +72,13 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
     try {
       const token = ensureLocalDemoSession();
       if (!token) {
-        throw new Error("Local demo mode is available only with placeholder Supabase config.");
+        throw new Error("Alpha Demo Mode is not enabled for this deployment.");
       }
       await verifyApiSession(token);
       router.push("/dashboard");
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Local demo mode is unavailable.");
+      setError(caught instanceof Error ? caught.message : "Alpha Demo Mode is unavailable.");
     } finally {
       setIsSubmitting(false);
     }
@@ -133,8 +134,13 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
       </Button>
       {canUseLocalDemo ? (
         <Button type="button" className="mt-3 w-full" variant="secondary" disabled={isSubmitting} onClick={continueInDemoMode}>
-          Continue in Demo Mode
+          Continue in Alpha Demo Mode
         </Button>
+      ) : null}
+      {alphaDemoMode ? (
+        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+          Alpha Demo Mode is enabled for this live demo. Real Supabase login remains available.
+        </p>
       ) : null}
       <p className="mt-5 text-center text-sm text-muted-foreground">
         {isSignup ? "Already have an account?" : "New to ABHAY?"}{" "}

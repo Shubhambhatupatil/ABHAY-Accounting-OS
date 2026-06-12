@@ -5,6 +5,10 @@ import { publicEnv } from "@/lib/config";
 export const LOCAL_DEMO_TOKEN = "abhay-local-demo-token";
 export const LOCAL_DEMO_STORAGE_KEY = "abhay.localDemoToken";
 
+export function isAlphaDemoModeEnabled() {
+  return publicEnv.NEXT_PUBLIC_ALPHA_DEMO_MODE.toLowerCase() === "true";
+}
+
 export function isPlaceholderSupabaseConfig() {
   const url = publicEnv.NEXT_PUBLIC_SUPABASE_URL;
   const key = publicEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -37,7 +41,7 @@ export function isHostedAlphaDemoUrl() {
 }
 
 export function isAlphaDemoFallbackAllowed() {
-  return isPlaceholderSupabaseConfig() || isLocalDevelopmentApi() || isHostedAlphaDemoUrl();
+  return isPlaceholderSupabaseConfig() || isLocalDevelopmentApi() || isAlphaDemoModeEnabled();
 }
 
 export function startLocalDemoSession() {
@@ -53,6 +57,11 @@ export function ensureLocalDemoSession() {
 export function getLocalDemoToken() {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(LOCAL_DEMO_STORAGE_KEY);
+}
+
+export function clearLocalDemoSession() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(LOCAL_DEMO_STORAGE_KEY);
 }
 
 export function getAlphaDemoTokenForAuthFailure(currentToken?: string | null) {

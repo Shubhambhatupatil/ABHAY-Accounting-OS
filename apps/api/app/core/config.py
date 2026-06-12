@@ -1,6 +1,9 @@
+import json
 from functools import lru_cache
+from typing import Any
 
 from pydantic import AnyHttpUrl, Field
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +14,7 @@ class Settings(BaseSettings):
     database_url: str = Field(min_length=1)
     cors_origins: list[str] = ["http://localhost:3000"]
     openai_api_key: str | None = None
+    alpha_demo_mode: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -22,8 +26,22 @@ class Settings(BaseSettings):
     def supabase_jwks_url(self) -> str:
         return f"{str(self.supabase_url).rstrip('/')}/auth/v1/.well-known/jwks.json"
 
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: Any) -> list[str]:
+        if isinstance(value, str):
+            raw_value = value.strip()
+            if not raw_value:
+                return []
+            if raw_value.startswith("["):
+                parsed = json.loads(raw_value)
+                if not isinstance(parsed, list):
+                    raise ValueError("CORS_ORIGINS JSON must be an array")
+                return [str(origin).strip() for origin in parsed if str(origin).strip()]
+            return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+        return value
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

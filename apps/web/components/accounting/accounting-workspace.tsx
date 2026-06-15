@@ -3,6 +3,8 @@
 import {
   Banknote,
   BookOpen,
+  Check,
+  Copy,
   FileDown,
   FileText,
   Landmark,
@@ -28,8 +30,9 @@ import {
   TrialBalanceRow,
   VoucherType
 } from "@/lib/api/accounting";
-import { getAccessToken } from "@/lib/auth/demo-auth";
+import { getAccessToken, isAlphaDemoModeEnabled, isLocalDevelopmentApi, tokenSourceFor } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
+import { publicEnv } from "@/lib/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -53,6 +56,27 @@ const categories: LedgerCategory[] = [
   "other"
 ];
 const voucherTypes: VoucherType[] = ["receipt", "payment", "contra", "journal", "purchase", "sales"];
+const gstStates = [
+  ["27", "Maharashtra"],
+  ["24", "Gujarat"],
+  ["29", "Karnataka"],
+  ["07", "Delhi"],
+  ["09", "Uttar Pradesh"],
+  ["08", "Rajasthan"],
+  ["33", "Tamil Nadu"],
+  ["36", "Telangana"],
+  ["32", "Kerala"],
+  ["19", "West Bengal"],
+  ["23", "Madhya Pradesh"],
+  ["06", "Haryana"],
+  ["03", "Punjab"],
+  ["10", "Bihar"],
+  ["21", "Odisha"],
+  ["18", "Assam"],
+  ["30", "Goa"],
+  ["04", "Chandigarh"]
+] as const;
+const gstRates = ["0%", "5%", "12%", "18%", "28%"];
 
 export function AccountingWorkspace() {
   const supabase = createSupabaseBrowserClient();
@@ -85,12 +109,16 @@ export function AccountingWorkspace() {
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   const [requestCompanyId, setRequestCompanyId] = useState("");
   const [requestRole, setRequestRole] = useState<"accountant" | "viewer">("accountant");
+  const [tokenSource, setTokenSource] = useState<"supabase" | "demo" | "missing">("missing");
+  const [companyIdCopied, setCompanyIdCopied] = useState(false);
+  const showAlphaDebug = isAlphaDemoModeEnabled() || isLocalDevelopmentApi();
 
   useEffect(() => {
     getAccessToken(supabase).then((accessToken) => {
       setToken(accessToken);
+      setTokenSource(tokenSourceFor(accessToken));
       if (!accessToken) {
-        setStatus("Sign in to load your accounting companies.");
+        setStatus("Please login or continue in Alpha Demo Mode.");
         return;
       }
       loadCompanies(accessToken);
@@ -227,6 +255,18 @@ export function AccountingWorkspace() {
     }
   }
 
+  async function copyCompanyId() {
+    if (!companyId) return;
+    try {
+      await window.navigator.clipboard.writeText(companyId);
+      setCompanyIdCopied(true);
+      setStatus("Company ID copied.");
+      window.setTimeout(() => setCompanyIdCopied(false), 1600);
+    } catch {
+      setStatus(`Company ID: ${companyId}`);
+    }
+  }
+
   return (
     <main className="abhay-page">
       <section className="mx-auto flex max-w-7xl flex-col gap-4">
@@ -240,6 +280,11 @@ export function AccountingWorkspace() {
               <span className="ai-badge mb-2 border-white/20 bg-white/10 text-white">AI Accounting Alpha</span>
               <h1 className="text-2xl font-semibold sm:text-3xl">ABHAY Accounting OS by ANVRITAI</h1>
               <p className="mt-1 text-sm text-white/80">Ledger, vouchers, GST, invoices, and live AI reports</p>
+              {showAlphaDebug ? (
+                <p className="mt-3 rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/75">
+                  API URL: {publicEnv.NEXT_PUBLIC_API_URL} | token source: {tokenSource}
+                </p>
+              ) : null}
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -292,7 +337,10 @@ export function AccountingWorkspace() {
               <Input value={newCompanyLegalName} onChange={(event) => setNewCompanyLegalName(event.target.value)} placeholder="Company legal name" required />
               <Input value={newCompanyTradeName} onChange={(event) => setNewCompanyTradeName(event.target.value)} placeholder="Trade name" />
               <Input value={newCompanyGstin} onChange={(event) => setNewCompanyGstin(event.target.value.toUpperCase())} placeholder="GSTIN optional" minLength={15} maxLength={15} />
-              <Input value={newCompanyStateCode} onChange={(event) => setNewCompanyStateCode(event.target.value)} placeholder="State code optional" minLength={2} maxLength={2} />
+              <select className="premium-select h-11" value={newCompanyStateCode} onChange={(event) => setNewCompanyStateCode(event.target.value)}>
+                <option value="">GST state code optional</option>
+                {gstStates.map(([code, name]) => <option key={code} value={code}>{code} {name}</option>)}
+              </select>
             </div>
             <Button className="mt-3" type="submit" disabled={isBusy || !newCompanyLegalName.trim()}>
               {isBusy ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />}
@@ -301,12 +349,16 @@ export function AccountingWorkspace() {
           </form>
           <AccessRequestsPanel
             accessRequests={accessRequests}
+            currentCompanyId={companyId}
+            currentCompanyName={companyName}
+            companyIdCopied={companyIdCopied}
             requestCompanyId={requestCompanyId}
             requestRole={requestRole}
             setRequestCompanyId={setRequestCompanyId}
             setRequestRole={setRequestRole}
             onRequest={submitAccessRequest}
             onDecision={decideAccessRequest}
+            onCopyCompanyId={copyCompanyId}
             isBusy={isBusy}
           />
         </section>
@@ -622,6 +674,17 @@ function GstPanel({ gstReport }: { gstReport: GstReport | null }) {
   return (
     <section className="space-y-3">
       <p className="empty-state">ABHAY provides GST assistance. Please verify before filing.</p>
+      <div className="glass-card p-4">
+        <h2 className="mb-3 text-base font-semibold">GST category/rate structure</h2>
+        <div className="flex flex-wrap gap-2">
+          {gstRates.map((rate) => (
+            <span key={rate} className="rounded-full border border-orange-100 bg-orange-50 px-3 py-1 text-sm font-semibold text-orange-700">
+              GST {rate}
+            </span>
+          ))}
+        </div>
+        <p className="mt-3 text-sm text-muted-foreground">Rate mapping is an Alpha assistance layer. Verify with CA before filing.</p>
+      </div>
       <Statement
         title="GST-ready insights"
         rows={[
@@ -636,18 +699,33 @@ function GstPanel({ gstReport }: { gstReport: GstReport | null }) {
 
 function AccessRequestsPanel(props: {
   accessRequests: AccessRequest[];
+  currentCompanyId: string;
+  currentCompanyName: string;
+  companyIdCopied: boolean;
   requestCompanyId: string;
   requestRole: "accountant" | "viewer";
   setRequestCompanyId: (value: string) => void;
   setRequestRole: (value: "accountant" | "viewer") => void;
   onRequest: () => Promise<void>;
   onDecision: (requestId: string, decision: "approve" | "reject", role: "accountant" | "viewer") => Promise<void>;
+  onCopyCompanyId: () => Promise<void>;
   isBusy: boolean;
 }) {
   return (
     <section className="glass-card p-4">
       <h2 className="text-base font-semibold">Access Requests</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Request access to a company or approve pending users as owner.</p>
+      <p className="mt-1 text-sm text-muted-foreground">Request access using Company ID. Owner can approve/reject.</p>
+      <div className="mt-4 rounded-2xl border border-white/70 bg-white/70 p-3">
+        <p className="text-xs text-muted-foreground">Selected company</p>
+        <p className="mt-1 font-semibold">{props.currentCompanyName}</p>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <code className="rounded-xl bg-slate-950 px-3 py-2 text-xs text-white">{props.currentCompanyId || "No company selected"}</code>
+          <Button type="button" variant="secondary" onClick={() => void props.onCopyCompanyId()} disabled={!props.currentCompanyId || props.isBusy}>
+            {props.companyIdCopied ? <Check size={16} /> : <Copy size={16} />}
+            {props.companyIdCopied ? "Copied" : "Copy ID"}
+          </Button>
+        </div>
+      </div>
       <form
         className="mt-4 grid gap-3 sm:grid-cols-[1fr_150px_140px]"
         onSubmit={(event) => {
@@ -670,7 +748,7 @@ function AccessRequestsPanel(props: {
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <p className="font-medium">{request.requester_email ?? request.requester_profile_id}</p>
-                <p className="text-muted-foreground">{title(request.requested_role)} · {title(request.status)}</p>
+                <p className="text-muted-foreground">{title(request.requested_role)} - {title(request.status)}</p>
               </div>
               {request.status === "pending" ? (
                 <div className="flex flex-wrap gap-2">

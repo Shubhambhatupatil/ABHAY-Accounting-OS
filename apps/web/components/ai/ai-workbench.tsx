@@ -12,7 +12,7 @@ import {
   AiOwnerReport
 } from "@/lib/api/ai-entry";
 import type { ConfirmAiPostingResponse } from "@/lib/api/ai-accountant";
-import { getAccessToken } from "@/lib/auth/demo-auth";
+import { getAccessToken, isAlphaDemoModeEnabled, isLocalDevelopmentApi, tokenSourceFor } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 import { publicEnv } from "@/lib/config";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,8 @@ export function AiWorkbench() {
   const [statusTone, setStatusTone] = useState<"loading" | "success" | "error" | "info">("loading");
   const [backendConnected, setBackendConnected] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [tokenSource, setTokenSource] = useState<"supabase" | "demo" | "missing">("missing");
+  const showAlphaDebug = isAlphaDemoModeEnabled() || isLocalDevelopmentApi();
 
   const loadCompanies = useCallback(async (accessToken: string) => {
     setStatusTone("loading");
@@ -87,10 +89,11 @@ export function AiWorkbench() {
         const accessToken = await getAccessToken(supabase);
         if (!active) return;
         setToken(accessToken);
+        setTokenSource(tokenSourceFor(accessToken));
         if (!accessToken) {
           setCompanies([]);
           setCompanyId("");
-          setStatus("Sign in to use AI Workbench.");
+          setStatus("Please login or continue in Alpha Demo Mode.");
           setStatusTone("error");
           return;
         }
@@ -251,6 +254,11 @@ export function AiWorkbench() {
                 <ReadinessBadge ready={backendConnected} readyText="Backend connected" pendingText="Backend offline" />
                 <ReadinessBadge ready={aiEngineReady} readyText="AI Engine ready" pendingText="AI Engine waiting" />
               </div>
+              {showAlphaDebug ? (
+                <p className="mt-3 rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/75">
+                  API URL: {publicEnv.NEXT_PUBLIC_API_URL} | token source: {tokenSource}
+                </p>
+              ) : null}
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">

@@ -5,6 +5,8 @@ import FinancialIntelligencePage from "@/app/(app)/financial-intelligence/page";
 import InvoicesPage from "@/app/(app)/invoices/page";
 import AutomationCenterPage from "@/app/(app)/automation-center/page";
 import CommandCenterPage from "@/app/(app)/command-center/page";
+import ImportDataPage from "@/app/(app)/import-data/page";
+import SubscriptionPage from "@/app/(app)/subscription/page";
 import { LAST_COMPANY_KEY } from "@/components/accounting/accounting-workspace";
 
 const pages = [
@@ -14,7 +16,9 @@ const pages = [
   BankReconciliationPage,
   FinancialIntelligencePage,
   AutomationCenterPage,
-  CommandCenterPage
+  CommandCenterPage,
+  ImportDataPage,
+  SubscriptionPage
 ];
 
 pages.forEach((Page) => {

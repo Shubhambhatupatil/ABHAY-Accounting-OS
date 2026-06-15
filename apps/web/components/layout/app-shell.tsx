@@ -6,8 +6,10 @@ import { useState } from "react";
 import {
   Banknote,
   Bot,
+  CreditCard,
   FileText,
   Gauge,
+  Upload,
   Landmark,
   LogOut,
   Menu,
@@ -24,6 +26,8 @@ import { cn } from "@/lib/utils";
 const navItems: Array<{ href: string; label: string; icon: typeof Gauge }> = [
   { href: "/dashboard", label: "Dashboard", icon: Gauge },
   { href: "/ai-workbench", label: "AI Workbench", icon: Bot },
+  { href: "/import-data", label: "Import Data", icon: Upload },
+  { href: "/subscription", label: "Subscription", icon: CreditCard },
   { href: "/command-center", label: "Command Center", icon: Sparkles },
   { href: "/automation-center", label: "Automation", icon: Bot },
   { href: "/invoices", label: "Invoices", icon: FileText },
@@ -31,6 +35,8 @@ const navItems: Array<{ href: string; label: string; icon: typeof Gauge }> = [
   { href: "/financial-intelligence", label: "Financial Intel", icon: TrendingUp },
   { href: "/bank-reconciliation", label: "Bank Reco", icon: Banknote }
 ];
+
+const LAST_COMPANY_KEY = "abhay.lastCompanyId";
 
 export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) {
   const pathname = usePathname();
@@ -72,6 +78,7 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
     try {
       await supabase.auth.signOut();
       clearLocalDemoSession();
+      window.localStorage.removeItem(LAST_COMPANY_KEY);
       router.replace("/login");
       router.refresh();
     } finally {

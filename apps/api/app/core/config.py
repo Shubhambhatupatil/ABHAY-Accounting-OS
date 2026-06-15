@@ -13,7 +13,13 @@ class Settings(BaseSettings):
     supabase_url: AnyHttpUrl
     supabase_jwt_audience: str = "authenticated"
     database_url: str = Field(min_length=1)
-    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
+    cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:3000",
+        "https://abhay-accounting-os-new.vercel.app",
+        "https://abhay.anvritai.com",
+        "https://anvritai.com",
+        "https://www.anvritai.com",
+    ]
     openai_api_key: str | None = None
     alpha_demo_mode: bool = False
 

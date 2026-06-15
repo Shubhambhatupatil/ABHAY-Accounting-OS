@@ -7,12 +7,17 @@ export type SessionUser = {
 };
 
 export async function verifyApiSession(accessToken: string): Promise<SessionUser> {
-  const response = await fetch(`${publicEnv.NEXT_PUBLIC_API_URL}/auth/session/verify`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${publicEnv.NEXT_PUBLIC_API_URL}/auth/session/verify`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+  } catch {
+    throw new Error(`API not reachable. Check NEXT_PUBLIC_API_URL. Current API: ${publicEnv.NEXT_PUBLIC_API_URL}`);
+  }
 
   if (!response.ok) {
     throw new Error("The API could not verify this session.");
@@ -20,4 +25,3 @@ export async function verifyApiSession(accessToken: string): Promise<SessionUser
 
   return response.json() as Promise<SessionUser>;
 }
-

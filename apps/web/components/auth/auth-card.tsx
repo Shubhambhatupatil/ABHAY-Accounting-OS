@@ -3,100 +3,134 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { Building2, Loader2, LogIn, UserPlus } from "lucide-react";
+import { Loader2, LogIn, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { accountingApi } from "@/lib/api/accounting";
 import { verifyApiSession } from "@/lib/api/auth";
-import { ensureLocalDemoSession, isAlphaDemoFallbackAllowed, isAlphaDemoModeEnabled } from "@/lib/auth/demo-auth";
+import { isAlphaDemoModeEnabled, startLocalDemoSession } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 
 type AuthMode = "login" | "signup";
+const AUTH_NOTICE_KEY = "abhay_auth_notice";
+export const SIGNUP_FIELD_LABELS = ["Full Name", "Business Name", "Email", "Password", "Confirm Password"] as const;
+export const AUTH_ACTION_LABELS = ["Login", "Create account", "Continue in Alpha Demo Mode"] as const;
 
 export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
+  const [fullName, setFullName] = useState("");
+  const [businessName, setBusinessName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [companyName, setCompanyName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [canUseLocalDemo, setCanUseLocalDemo] = useState(false);
   const isSignup = mode === "signup";
   const alphaDemoMode = isAlphaDemoModeEnabled();
 
   useEffect(() => {
-    setCanUseLocalDemo(isAlphaDemoFallbackAllowed());
-  }, []);
+    setCanUseLocalDemo(alphaDemoMode);
+    const notice = window.sessionStorage.getItem(AUTH_NOTICE_KEY);
+    if (notice) {
+      setSuccess(notice);
+      window.sessionStorage.removeItem(AUTH_NOTICE_KEY);
+    }
+  }, [alphaDemoMode]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting) return;
     setError(null);
+    setSuccess(null);
     setIsSubmitting(true);
+    const normalizedEmail = email.trim().toLowerCase();
 
     try {
-      if (isSignup && password !== confirmPassword) {
-        throw new Error("Passwords do not match.");
-      }
-      const result = isSignup
-        ? await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              data: {
-                full_name: fullName,
-                initial_company_name: companyName
-              }
+      validateAuthForm(normalizedEmail, password, isSignup ? confirmPassword : undefined, isSignup ? fullName : undefined);
+      if (isSignup) {
+        const result = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password,
+          options: {
+            data: {
+              full_name: fullName.trim(),
+              initial_company_name: businessName.trim() || undefined
             }
-          })
-        : await supabase.auth.signInWithPassword({ email, password });
+          }
+        });
+        if (result.error) {
+          throw result.error;
+        }
+        if (result.data.user && result.data.user.identities?.length === 0) {
+          throw new Error("user already registered");
+        }
+        const accessToken = result.data.session?.access_token;
+        if (!accessToken) {
+          setSuccess("Account created. Please confirm your email, or continue in Alpha Demo Mode for now.");
+          return;
+        }
+        await verifyApiSession(accessToken);
+        setSuccess("Account created. Opening dashboard...");
+        router.push("/dashboard");
+        router.refresh();
+        return;
+      }
 
+      const result = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
       if (result.error) {
         throw result.error;
       }
-      if (isSignup && result.data.user && result.data.user.identities?.length === 0) {
-        throw new Error("Email already registered. Please sign in instead.");
-      }
-
-      let accessToken = result.data.session?.access_token;
-      if (isSignup && !accessToken) {
-        const loginResult = await supabase.auth.signInWithPassword({ email, password });
-        if (loginResult.error) {
-          throw loginResult.error;
-        }
-        accessToken = loginResult.data.session?.access_token;
-      }
+      const accessToken = result.data.session?.access_token;
       if (accessToken) {
         await verifyApiSession(accessToken);
-        if (isSignup && companyName.trim()) {
-          await accountingApi.createCompany(accessToken, { legal_name: companyName.trim() });
-        }
+        setSuccess("Login successful. Opening dashboard...");
+        router.push("/dashboard");
+        router.refresh();
+        return;
       }
-
-      router.push("/dashboard");
-      router.refresh();
+      throw new Error("email not confirmed");
     } catch (caught) {
-      setError(formatAuthError(caught));
+      setError(formatAuthError(caught, mode));
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  async function continueInDemoMode() {
+  function continueInDemoMode() {
+    if (isSubmitting) return;
     setError(null);
+    setSuccess(null);
+    if (!alphaDemoMode) {
+      setError("Alpha Demo Mode is disabled in this environment.");
+      return;
+    }
+    setIsSubmitting(true);
+    startLocalDemoSession();
+    setSuccess("Alpha Demo Mode active. Opening dashboard...");
+    router.push("/dashboard");
+    router.refresh();
+    window.setTimeout(() => setIsSubmitting(false), 750);
+  }
+
+  async function resetPassword() {
+    if (isSubmitting) return;
+    setError(null);
+    setSuccess(null);
     setIsSubmitting(true);
     try {
-      const token = ensureLocalDemoSession();
-      if (!token) {
-        throw new Error("Alpha Demo Mode is not enabled for this deployment.");
+      const normalizedEmail = email.trim().toLowerCase();
+      validateEmail(normalizedEmail);
+      const result = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: typeof window === "undefined" ? undefined : `${window.location.origin}/login`
+      });
+      if (result.error) {
+        throw result.error;
       }
-      await verifyApiSession(token);
-      router.push("/dashboard");
-      router.refresh();
+      setSuccess("Password reset email sent if this email is registered.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Alpha Demo Mode is unavailable.");
+      setError(formatPasswordResetError(caught));
     } finally {
       setIsSubmitting(false);
     }
@@ -105,27 +139,24 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
   return (
     <form onSubmit={handleSubmit} className="glass-panel w-full max-w-sm p-5">
       <div className="mb-5">
-        <span className="ai-badge mb-3">AI Accounting Alpha</span>
+        <span className="ai-badge mb-3">ABHAY Alpha v0.1 Auth Stable</span>
         <h2 className="text-xl font-semibold">{isSignup ? "Create your account" : "Sign in"}</h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {isSignup
-            ? "Start with your company account and invite your accounting team later."
-            : "Access your companies, roles, and accounting workspace."}
+            ? "Create your Alpha account. Email confirmation may be required by Supabase."
+            : "Login with email/password, create an account, or continue in Alpha Demo Mode."}
         </p>
       </div>
       <div className="space-y-4">
         {isSignup ? (
           <>
             <label className="block space-y-2 text-sm font-medium">
-              <span>Full name</span>
-              <Input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
+              <span>Full Name</span>
+              <Input value={fullName} onChange={(event) => setFullName(event.target.value)} autoComplete="name" required />
             </label>
             <label className="block space-y-2 text-sm font-medium">
-              <span>Company name</span>
-              <div className="relative">
-                <Building2 className="pointer-events-none absolute left-3 top-3 text-muted-foreground" size={18} />
-                <Input className="pl-10" value={companyName} onChange={(event) => setCompanyName(event.target.value)} required />
-              </div>
+              <span>Business Name</span>
+              <Input value={businessName} onChange={(event) => setBusinessName(event.target.value)} autoComplete="organization" />
             </label>
           </>
         ) : null}
@@ -159,53 +190,107 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
         ) : null}
       </div>
       {error ? <p className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
+      {success ? <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{success}</p> : null}
       <Button type="submit" className="mt-5 w-full" disabled={isSubmitting}>
         {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : isSignup ? <UserPlus size={18} /> : <LogIn size={18} />}
-        {isSignup ? "Create account" : "Sign in"}
+        {isSignup ? "Create account" : "Login"}
       </Button>
-      {canUseLocalDemo ? (
-        <Button type="button" className="mt-3 w-full" variant="secondary" disabled={isSubmitting} onClick={continueInDemoMode}>
-          Continue in Alpha Demo Mode
-        </Button>
+      {!isSignup ? (
+        <Link
+          className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-xl border border-white/70 bg-white/75 px-4 text-sm font-semibold text-foreground shadow-sm backdrop-blur transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+          href="/signup"
+        >
+          Create account
+        </Link>
+      ) : null}
+      <Button type="button" className="mt-3 w-full" variant="secondary" disabled={isSubmitting || !canUseLocalDemo} onClick={continueInDemoMode}>
+        Continue in Alpha Demo Mode
+      </Button>
+      {!canUseLocalDemo ? (
+        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+          Alpha Demo Mode is disabled in this environment.
+        </p>
       ) : null}
       {alphaDemoMode ? (
         <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-          Alpha Demo Mode is enabled for this live demo. Real Supabase login remains available.
+          For Alpha testing, use Alpha Demo Mode. Production login will be hardened before paid launch.
         </p>
       ) : null}
       {!isSignup ? (
         <button
           type="button"
           className="mt-4 w-full text-center text-sm font-medium text-primary"
-          onClick={() => setError("Password reset link is coming soon for Alpha. Use Alpha Demo Mode for the live walkthrough.")}
+          disabled={isSubmitting}
+          onClick={resetPassword}
         >
           Forgot password?
         </button>
       ) : null}
       <p className="mt-5 text-center text-sm text-muted-foreground">
-        {isSignup ? "Already have an account?" : "New to ABHAY?"}{" "}
+        {isSignup ? "Already have account?" : "New to ABHAY?"}{" "}
         <Link className="font-medium text-primary" href={isSignup ? "/login" : "/signup"}>
-          {isSignup ? "Sign in" : "Create account"}
+          {isSignup ? "Login" : "Create account"}
         </Link>
       </p>
     </form>
   );
 }
 
-function formatAuthError(caught: unknown) {
+function validateEmail(email: string) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("invalid email");
+  }
+}
+
+function validateAuthForm(email: string, password: string, confirmPassword?: string, fullName?: string) {
+  if (fullName !== undefined && !fullName.trim()) {
+    throw new Error("full name required");
+  }
+  validateEmail(email);
+  if (password.length < 8) {
+    throw new Error("invalid password");
+  }
+  if (confirmPassword !== undefined && password !== confirmPassword) {
+    throw new Error("passwords do not match");
+  }
+}
+
+function formatAuthError(caught: unknown, mode: AuthMode) {
   const message = caught instanceof Error ? caught.message : "Authentication failed.";
   const normalized = message.toLowerCase();
-  if (normalized.includes("already registered") || normalized.includes("already been registered") || normalized.includes("user already registered")) {
-    return "Email already registered. Please sign in instead.";
+  if (normalized.includes("rate limit") || normalized.includes("too many") || normalized.includes("email rate limit")) {
+    return "Email service is rate limited. Please wait or use Alpha Demo Mode.";
   }
-  if (normalized.includes("invalid login") || normalized.includes("invalid credentials")) {
-    return "Invalid email or password.";
+  if (normalized.includes("already registered") || normalized.includes("already been registered") || normalized.includes("user already registered")) {
+    return "This email may already be registered. Try login or reset password.";
+  }
+  if (normalized.includes("invalid email")) {
+    return "Enter a valid email address.";
+  }
+  if (normalized.includes("full name required")) {
+    return "Full Name is required.";
+  }
+  if (normalized.includes("passwords do not match")) {
+    return "Passwords do not match.";
+  }
+  if (normalized.includes("invalid login") || normalized.includes("invalid credentials") || normalized.includes("email not confirmed")) {
+    return mode === "login"
+      ? "Login failed. Check password, email confirmation, or use Alpha Demo Mode."
+      : "Account created. Please confirm your email, or continue in Alpha Demo Mode for now.";
   }
   if (normalized.includes("password")) {
     return "Invalid password. Use at least 8 characters.";
   }
-  if (normalized.includes("email not confirmed") || normalized.includes("confirm")) {
-    return "Email not confirmed. Please confirm your email or use Alpha Demo Mode.";
+  return mode === "login"
+    ? "Login failed. Check password, email confirmation, or use Alpha Demo Mode."
+    : "Signup failed. Try login if this email already exists, or use Alpha Demo Mode.";
+}
+
+function formatPasswordResetError(caught: unknown) {
+  const message = caught instanceof Error ? caught.message : "Password reset failed.";
+  const normalized = message.toLowerCase();
+  if (normalized.includes("rate limit") || normalized.includes("smtp") || normalized.includes("email")) {
+    return "Password reset email is temporarily unavailable. Use Alpha Demo Mode or contact ANVRITAI.";
   }
-  return message;
+  return "Password reset email is temporarily unavailable. Use Alpha Demo Mode or contact ANVRITAI.";
 }

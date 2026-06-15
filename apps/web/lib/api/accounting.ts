@@ -185,7 +185,7 @@ async function api<T>(path: string, options: ApiOptions): Promise<T> {
       body: options.body ? JSON.stringify(options.body) : undefined
     });
   } catch {
-    throw new Error(`API unavailable at ${url}. Start the ABHAY API server and check NEXT_PUBLIC_API_URL.`);
+    throw new Error(`API not reachable. Check NEXT_PUBLIC_API_URL. Current API: ${publicEnv.NEXT_PUBLIC_API_URL}`);
   }
 
   if (!response.ok) {

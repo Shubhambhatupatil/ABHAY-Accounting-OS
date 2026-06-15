@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Banknote,
   Bot,
@@ -12,13 +12,21 @@ import {
   Upload,
   Landmark,
   LogOut,
+  LogIn,
   Menu,
   Sparkles,
   TrendingUp,
+  UserPlus,
   X
 } from "lucide-react";
 import { accountingApi } from "@/lib/api/accounting";
-import { clearLocalDemoSession, getAccessToken, getLocalDemoToken, isAlphaDemoModeEnabled } from "@/lib/auth/demo-auth";
+import {
+  clearLocalDemoSession,
+  getAccessToken,
+  getLocalDemoToken,
+  isAlphaDemoModeEnabled,
+  startLocalDemoSession
+} from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -37,6 +45,7 @@ const navItems: Array<{ href: string; label: string; icon: typeof Gauge }> = [
 ];
 
 const LAST_COMPANY_KEY = "abhay.lastCompanyId";
+const AUTH_NOTICE_KEY = "abhay_auth_notice";
 
 export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) {
   const pathname = usePathname();
@@ -45,8 +54,32 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "missing">("checking");
   const alphaDemoMode = isAlphaDemoModeEnabled();
   const isDemoSession = Boolean(getLocalDemoToken());
+
+  useEffect(() => {
+    let active = true;
+    const timeoutId = window.setTimeout(() => {
+      if (active) setAuthStatus("missing");
+    }, 3500);
+
+    getAccessToken(supabase)
+      .then((token) => {
+        if (!active) return;
+        setAuthStatus(token ? "authenticated" : "missing");
+      })
+      .catch(() => {
+        if (active) setAuthStatus("missing");
+      })
+      .finally(() => window.clearTimeout(timeoutId));
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function createDemoCompany() {
     setIsBusy(true);
@@ -77,13 +110,51 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
     setStatus("");
     try {
       await supabase.auth.signOut();
-      clearLocalDemoSession();
-      window.localStorage.removeItem(LAST_COMPANY_KEY);
+      clearAuthLocalStorage();
+      window.sessionStorage.setItem(AUTH_NOTICE_KEY, "Logged out successfully.");
       router.replace("/login");
       router.refresh();
     } finally {
       setIsBusy(false);
     }
+  }
+
+  function continueInAlphaDemoMode() {
+    startLocalDemoSession();
+    setAuthStatus("authenticated");
+    setStatus("Alpha Demo Mode active.");
+    router.push("/dashboard");
+    router.refresh();
+  }
+
+  if (authStatus !== "authenticated") {
+    return (
+      <main className="abhay-shell-bg flex min-h-screen items-center justify-center p-4">
+        <section className="glass-panel max-w-md p-6 text-center">
+          <span className="ai-badge mb-4">ABHAY Alpha v0.1 Auth Stable</span>
+          <h1 className="text-2xl font-semibold">Please login or continue in Alpha Demo Mode</h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            {authStatus === "checking"
+              ? "Checking your secure session..."
+              : "For Alpha testing, use Alpha Demo Mode. Production login will be hardened before paid launch."}
+          </p>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <Button type="button" variant="secondary" onClick={() => router.push("/login")}>
+              <LogIn size={17} />
+              Login
+            </Button>
+            <Button type="button" onClick={continueInAlphaDemoMode}>
+              <Sparkles size={17} />
+              Alpha Demo Mode
+            </Button>
+          </div>
+          <Link className="mt-4 inline-flex items-center justify-center gap-2 text-sm font-semibold text-primary" href="/signup">
+            <UserPlus size={16} />
+            Create account
+          </Link>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -159,6 +230,18 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
       <div className="min-w-0">{children}</div>
     </div>
   );
+}
+
+function clearAuthLocalStorage() {
+  clearLocalDemoSession();
+  window.localStorage.removeItem(LAST_COMPANY_KEY);
+  for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.localStorage.key(index);
+    if (!key) continue;
+    if (key.startsWith("sb-") || key.startsWith("abhay_") || key.startsWith("abhay.")) {
+      window.localStorage.removeItem(key);
+    }
+  }
 }
 
 function Brand() {

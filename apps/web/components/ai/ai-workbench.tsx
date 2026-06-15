@@ -256,7 +256,8 @@ export function AiWorkbench() {
               </div>
               {showAlphaDebug ? (
                 <p className="mt-3 rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/75">
-                  API URL: {publicEnv.NEXT_PUBLIC_API_URL} | token source: {tokenSource}
+                  API URL: {publicEnv.NEXT_PUBLIC_API_URL} | token source: {tokenSource} | backend status:{" "}
+                  {backendConnected ? "connected" : "offline"}
                 </p>
               ) : null}
             </div>

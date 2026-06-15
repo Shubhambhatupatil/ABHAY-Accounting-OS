@@ -61,14 +61,19 @@ export type AiCorrection = {
 };
 
 async function api<T>(path: string, token: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-  const response = await fetch(`${publicEnv.NEXT_PUBLIC_API_URL}${path}`, {
-    method: options.method ?? "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${publicEnv.NEXT_PUBLIC_API_URL}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    });
+  } catch {
+    throw new Error(`API not reachable. Check NEXT_PUBLIC_API_URL. Current API: ${publicEnv.NEXT_PUBLIC_API_URL}`);
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Request failed" }));

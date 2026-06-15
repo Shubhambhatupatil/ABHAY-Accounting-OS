@@ -110,8 +110,30 @@ export function AccountingWorkspace() {
   const [requestCompanyId, setRequestCompanyId] = useState("");
   const [requestRole, setRequestRole] = useState<"accountant" | "viewer">("accountant");
   const [tokenSource, setTokenSource] = useState<"supabase" | "demo" | "missing">("missing");
+  const [backendConnected, setBackendConnected] = useState(false);
   const [companyIdCopied, setCompanyIdCopied] = useState(false);
   const showAlphaDebug = isAlphaDemoModeEnabled() || isLocalDevelopmentApi();
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 3000);
+
+    fetch(`${publicEnv.NEXT_PUBLIC_API_URL}/health`, { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (active) setBackendConnected(response.ok);
+      })
+      .catch(() => {
+        if (active) setBackendConnected(false);
+      })
+      .finally(() => window.clearTimeout(timeoutId));
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, []);
 
   useEffect(() => {
     getAccessToken(supabase).then((accessToken) => {
@@ -282,7 +304,8 @@ export function AccountingWorkspace() {
               <p className="mt-1 text-sm text-white/80">Ledger, vouchers, GST, invoices, and live AI reports</p>
               {showAlphaDebug ? (
                 <p className="mt-3 rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/75">
-                  API URL: {publicEnv.NEXT_PUBLIC_API_URL} | token source: {tokenSource}
+                  API URL: {publicEnv.NEXT_PUBLIC_API_URL} | token source: {tokenSource} | backend status:{" "}
+                  {backendConnected ? "connected" : "offline"}
                 </p>
               ) : null}
             </div>

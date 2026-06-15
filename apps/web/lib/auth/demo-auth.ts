@@ -3,8 +3,12 @@
 import { publicEnv } from "@/lib/config";
 
 export const LOCAL_DEMO_TOKEN = "abhay-local-demo-token";
-export const LOCAL_DEMO_STORAGE_KEY = "abhay.localDemoToken";
-export const ALPHA_DEMO_MODE_STORAGE_KEY = "abhay.alphaDemoMode";
+export const LOCAL_DEMO_STORAGE_KEY = "abhay_demo_token";
+export const ALPHA_DEMO_MODE_STORAGE_KEY = "abhay_alpha_demo";
+
+const LEGACY_LOCAL_DEMO_STORAGE_KEY = "abhay.localDemoToken";
+const LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY = "abhay.alphaDemoMode";
+const ACCESS_TOKEN_TIMEOUT_MS = 2500;
 
 export function isAlphaDemoModeEnabled() {
   return publicEnv.NEXT_PUBLIC_ALPHA_DEMO_MODE.toLowerCase() === "true";
@@ -48,6 +52,8 @@ export function isAlphaDemoFallbackAllowed() {
 export function startLocalDemoSession() {
   window.localStorage.setItem(ALPHA_DEMO_MODE_STORAGE_KEY, "true");
   window.localStorage.setItem(LOCAL_DEMO_STORAGE_KEY, LOCAL_DEMO_TOKEN);
+  window.localStorage.removeItem(LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_LOCAL_DEMO_STORAGE_KEY);
   return LOCAL_DEMO_TOKEN;
 }
 
@@ -58,38 +64,28 @@ export function ensureLocalDemoSession() {
 
 export function getLocalDemoToken() {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(LOCAL_DEMO_STORAGE_KEY);
+  return window.localStorage.getItem(LOCAL_DEMO_STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_LOCAL_DEMO_STORAGE_KEY);
 }
 
 export function hasAlphaDemoModeFlag() {
   if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(ALPHA_DEMO_MODE_STORAGE_KEY) === "true";
+  return (
+    window.localStorage.getItem(ALPHA_DEMO_MODE_STORAGE_KEY) === "true" ||
+    window.localStorage.getItem(LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY) === "true"
+  );
 }
 
 export function clearLocalDemoSession() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(ALPHA_DEMO_MODE_STORAGE_KEY);
   window.localStorage.removeItem(LOCAL_DEMO_STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_LOCAL_DEMO_STORAGE_KEY);
 }
 
 export function tokenSourceFor(token: string | null | undefined): "supabase" | "demo" | "missing" {
   if (!token) return "missing";
   return token === LOCAL_DEMO_TOKEN ? "demo" : "supabase";
-}
-
-export function getAlphaDemoTokenForAuthFailure(currentToken?: string | null) {
-  if (currentToken === LOCAL_DEMO_TOKEN || !isAlphaDemoFallbackAllowed()) return null;
-  return startLocalDemoSession();
-}
-
-async function apiAcceptsToken(token: string) {
-  const response = await fetch(`${publicEnv.NEXT_PUBLIC_API_URL}/auth/session/verify`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  });
-  return response.ok;
 }
 
 type SessionCapableSupabase = {
@@ -98,22 +94,26 @@ type SessionCapableSupabase = {
   };
 };
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error("Session check timed out.")), timeoutMs);
+    })
+  ]);
+}
+
 export async function getAccessToken(supabase: SessionCapableSupabase) {
   try {
-    if (hasAlphaDemoModeFlag() && isAlphaDemoFallbackAllowed()) {
-      return getLocalDemoToken() ?? startLocalDemoSession();
+    if (getLocalDemoToken() === LOCAL_DEMO_TOKEN) {
+      return startLocalDemoSession();
     }
-    const { data } = await supabase.auth.getSession();
-    const storedDemoToken = getLocalDemoToken();
-    const token = data.session?.access_token ?? storedDemoToken ?? (isPlaceholderSupabaseConfig() || isLocalDevelopmentApi() ? ensureLocalDemoSession() : null);
-    if (!token || token === LOCAL_DEMO_TOKEN) return token;
-    try {
-      if (await apiAcceptsToken(token)) return token;
-    } catch {
-      return getAlphaDemoTokenForAuthFailure(token) ?? token;
+    if (hasAlphaDemoModeFlag()) {
+      return startLocalDemoSession();
     }
-    return getAlphaDemoTokenForAuthFailure(token) ?? token;
+    const { data } = await withTimeout(supabase.auth.getSession(), ACCESS_TOKEN_TIMEOUT_MS);
+    return data.session?.access_token ?? null;
   } catch {
-    return getLocalDemoToken() ?? (isPlaceholderSupabaseConfig() || isLocalDevelopmentApi() ? ensureLocalDemoSession() : null);
+    return hasAlphaDemoModeFlag() ? startLocalDemoSession() : null;
   }
 }

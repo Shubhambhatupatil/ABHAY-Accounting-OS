@@ -31,8 +31,8 @@ const plans = [
   }
 ];
 
-const statuses = ["Active", "Trial", "Expired"];
-const paymentStatuses = ["Pending", "Paid", "Failed"];
+const statuses = ["Trial Active", "Active", "Payment Pending", "Expired"];
+const paymentStatuses = ["Payment Pending", "Paid", "Failed"];
 
 export function SubscriptionWorkspace() {
   const razorpayConfigured = Boolean(publicEnv.NEXT_PUBLIC_RAZORPAY_KEY_ID);

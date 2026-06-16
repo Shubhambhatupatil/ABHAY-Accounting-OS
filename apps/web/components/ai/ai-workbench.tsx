@@ -346,6 +346,7 @@ export function AiWorkbench() {
           <section className="glass-panel p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
+                <span className="ai-badge mb-2">Suggestion Preview</span>
                 <h2 className="text-lg font-semibold">Suggested {title(suggestion.suggestion.voucher_type)} Voucher</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Confidence {Number(suggestion.suggestion.confidence).toFixed(2)} · {title(suggestion.confidence_band)} · {title(suggestion.workflow_state)} · {suggestion.suggestion.model_name}

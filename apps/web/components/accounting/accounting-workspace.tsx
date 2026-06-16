@@ -1,14 +1,17 @@
 "use client";
 
 import {
+  Activity,
   Banknote,
   BookOpen,
+  CalendarDays,
   Check,
   Copy,
   FileDown,
   FileText,
   Landmark,
   Loader2,
+  Package,
   Plus,
   ReceiptIndianRupee,
   RefreshCw,
@@ -21,6 +24,7 @@ import {
   accountingApi,
   AccountNature,
   AccessRequest,
+  AuditEvent,
   Company,
   DashboardMetrics,
   GstReport,
@@ -28,6 +32,7 @@ import {
   LedgerCategory,
   LedgerGroup,
   TrialBalanceRow,
+  Voucher,
   VoucherType
 } from "@/lib/api/accounting";
 import { getAccessToken, isAlphaDemoModeEnabled, isLocalDevelopmentApi, tokenSourceFor } from "@/lib/auth/demo-auth";
@@ -37,8 +42,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-type Tab = "dashboard" | "ledgers" | "vouchers" | "invoices" | "reports" | "gst";
+type Tab = "dashboard" | "ledgers" | "vouchers" | "invoices" | "reports" | "gst" | "inventory" | "activity";
+type InventoryItem = {
+  id: string;
+  name: string;
+  unit: string;
+  hsnSac: string;
+  openingStock: number;
+  purchaseStock: number;
+  salesStock: number;
+  rate: number;
+};
 export const LAST_COMPANY_KEY = "abhay.lastCompanyId";
+const FINANCIAL_YEAR_KEY = "abhay.selectedFinancialYear";
+const CUSTOM_FINANCIAL_YEAR_KEY = "abhay.customFinancialYear";
+const INVENTORY_ALPHA_KEY = "abhay.inventoryAlpha";
 
 const natures: AccountNature[] = ["asset", "liability", "income", "expense", "equity"];
 const categories: LedgerCategory[] = [
@@ -56,6 +74,7 @@ const categories: LedgerCategory[] = [
   "other"
 ];
 const voucherTypes: VoucherType[] = ["receipt", "payment", "contra", "journal", "purchase", "sales"];
+const financialYears = ["FY 2024-25", "FY 2025-26", "FY 2026-27", "Custom FY"] as const;
 const gstStates = [
   ["27", "Maharashtra"],
   ["24", "Gujarat"],
@@ -97,7 +116,12 @@ export function AccountingWorkspace() {
   const [cashFlow, setCashFlow] = useState<{ net_cash_flow: string; operating_cash_flow: string } | null>(null);
   const [gstReport, setGstReport] = useState<GstReport | null>(null);
   const [invoices, setInvoices] = useState<Array<{ id: string; invoice_number: string; total_amount: string }>>([]);
+  const [vouchers, setVouchers] = useState<Voucher[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [tab, setTab] = useState<Tab>("dashboard");
+  const [selectedFinancialYear, setSelectedFinancialYear] = useState("FY 2025-26");
+  const [customFinancialYear, setCustomFinancialYear] = useState("");
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [search, setSearch] = useState("");
   const [natureFilter, setNatureFilter] = useState("");
   const [status, setStatus] = useState("Loading accounting workspace");
@@ -113,6 +137,37 @@ export function AccountingWorkspace() {
   const [backendConnected, setBackendConnected] = useState(false);
   const [companyIdCopied, setCompanyIdCopied] = useState(false);
   const showAlphaDebug = isAlphaDemoModeEnabled() || isLocalDevelopmentApi();
+
+  useEffect(() => {
+    const savedFinancialYear = window.localStorage.getItem(FINANCIAL_YEAR_KEY);
+    const savedCustomFinancialYear = window.localStorage.getItem(CUSTOM_FINANCIAL_YEAR_KEY);
+    if (savedFinancialYear) setSelectedFinancialYear(savedFinancialYear);
+    if (savedCustomFinancialYear) setCustomFinancialYear(savedCustomFinancialYear);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(FINANCIAL_YEAR_KEY, selectedFinancialYear);
+    window.localStorage.setItem(CUSTOM_FINANCIAL_YEAR_KEY, customFinancialYear);
+  }, [customFinancialYear, selectedFinancialYear]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    const stored = window.localStorage.getItem(`${INVENTORY_ALPHA_KEY}.${companyId}`);
+    if (!stored) {
+      setInventoryItems([]);
+      return;
+    }
+    try {
+      setInventoryItems(JSON.parse(stored) as InventoryItem[]);
+    } catch {
+      setInventoryItems([]);
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    window.localStorage.setItem(`${INVENTORY_ALPHA_KEY}.${companyId}`, JSON.stringify(inventoryItems));
+  }, [companyId, inventoryItems]);
 
   useEffect(() => {
     let active = true;
@@ -200,7 +255,7 @@ export function AccountingWorkspace() {
       if (search) query.set("search", search);
       if (natureFilter) query.set("nature", natureFilter);
       const queryString = query.toString() ? `?${query}` : "";
-      const [groupRows, ledgerRows, metricRows, tbRows, pnlRows, bsRows, cfRows, invoiceRows, gstRows] =
+      const [groupRows, ledgerRows, metricRows, tbRows, pnlRows, bsRows, cfRows, invoiceRows, gstRows, voucherRows, auditRows] =
         await Promise.all([
           accountingApi.groups(selectedCompanyId, token),
           accountingApi.ledgers(selectedCompanyId, token, queryString),
@@ -210,7 +265,9 @@ export function AccountingWorkspace() {
           accountingApi.balanceSheet(selectedCompanyId, token),
           accountingApi.cashFlow(selectedCompanyId, token),
           accountingApi.invoices(selectedCompanyId, token),
-          accountingApi.gstReport(selectedCompanyId, token)
+          accountingApi.gstReport(selectedCompanyId, token),
+          accountingApi.vouchers(selectedCompanyId, token),
+          accountingApi.auditEvents(selectedCompanyId, token).catch(() => [])
         ]);
       setGroups(groupRows);
       setLedgers(ledgerRows);
@@ -221,6 +278,8 @@ export function AccountingWorkspace() {
       setCashFlow(cfRows);
       setInvoices(invoiceRows);
       setGstReport(gstRows);
+      setVouchers(voucherRows);
+      setAuditEvents(auditRows);
       void loadAccessRequests(selectedCompanyId);
       setStatus("Accounting data refreshed");
     } catch (error) {
@@ -239,6 +298,13 @@ export function AccountingWorkspace() {
   }, [companyId]);
 
   const companyName = companies.find((company) => company.id === companyId)?.legal_name ?? "Company";
+  const activeFinancialYear =
+    selectedFinancialYear === "Custom FY" ? customFinancialYear.trim() || "Custom FY" : selectedFinancialYear;
+  const fyFilteredVouchers = useMemo(
+    () => vouchers.filter((voucher) => isVoucherInFinancialYear(voucher.voucher_date, selectedFinancialYear, customFinancialYear)),
+    [customFinancialYear, selectedFinancialYear, vouchers]
+  );
+  const inventorySummary = useMemo(() => summarizeInventory(inventoryItems), [inventoryItems]);
 
   async function loadAccessRequests(selectedCompanyId = companyId) {
     if (!token || !selectedCompanyId) return;
@@ -311,6 +377,12 @@ export function AccountingWorkspace() {
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
+            <FinancialYearSelector
+              selectedFinancialYear={selectedFinancialYear}
+              customFinancialYear={customFinancialYear}
+              setSelectedFinancialYear={setSelectedFinancialYear}
+              setCustomFinancialYear={setCustomFinancialYear}
+            />
             <select
               className="premium-select text-slate-900"
               value={companyId}
@@ -330,8 +402,8 @@ export function AccountingWorkspace() {
           </div>
         </header>
 
-        <nav className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          {(["dashboard", "ledgers", "vouchers", "invoices", "reports", "gst"] as Tab[]).map((item) => (
+        <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+          {(["dashboard", "ledgers", "vouchers", "invoices", "reports", "gst", "inventory", "activity"] as Tab[]).map((item) => (
             <Button
               key={item}
               type="button"
@@ -359,7 +431,15 @@ export function AccountingWorkspace() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <Input value={newCompanyLegalName} onChange={(event) => setNewCompanyLegalName(event.target.value)} placeholder="Company legal name" required />
               <Input value={newCompanyTradeName} onChange={(event) => setNewCompanyTradeName(event.target.value)} placeholder="Trade name" />
-              <Input value={newCompanyGstin} onChange={(event) => setNewCompanyGstin(event.target.value.toUpperCase())} placeholder="GSTIN optional" minLength={15} maxLength={15} />
+              <Input
+                value={newCompanyGstin}
+                onChange={(event) => setNewCompanyGstin(event.target.value.toUpperCase())}
+                placeholder="GSTIN optional"
+                minLength={15}
+                maxLength={15}
+                pattern="[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]"
+                title="Enter a valid 15-character GSTIN, for example 27ABCDE1234F1Z5."
+              />
               <select className="premium-select h-11" value={newCompanyStateCode} onChange={(event) => setNewCompanyStateCode(event.target.value)}>
                 <option value="">GST state code optional</option>
                 {gstStates.map(([code, name]) => <option key={code} value={code}>{code} {name}</option>)}
@@ -386,7 +466,15 @@ export function AccountingWorkspace() {
           />
         </section>
 
-        {tab === "dashboard" ? <DashboardPanel metrics={metrics} companyName={companyName} /> : null}
+        {tab === "dashboard" ? (
+          <DashboardPanel
+            metrics={metrics}
+            companyName={companyName}
+            activeFinancialYear={activeFinancialYear}
+            voucherCount={fyFilteredVouchers.length}
+            inventorySummary={inventorySummary}
+          />
+        ) : null}
         {tab === "ledgers" ? (
           <LedgersPanel
             groups={groups}
@@ -410,6 +498,8 @@ export function AccountingWorkspace() {
         {tab === "vouchers" ? (
           <VouchersPanel
             ledgers={ledgers}
+            vouchers={fyFilteredVouchers}
+            activeFinancialYear={activeFinancialYear}
             onPost={(payload) =>
               token ? accountingApi.createVoucher(companyId, token, payload).then(() => refresh()) : null
             }
@@ -430,12 +520,60 @@ export function AccountingWorkspace() {
           <ReportsPanel trialBalance={trialBalance} pnl={pnl} balanceSheet={balanceSheet} cashFlow={cashFlow} />
         ) : null}
         {tab === "gst" ? <GstPanel gstReport={gstReport} /> : null}
+        {tab === "inventory" ? (
+          <InventoryPanel items={inventoryItems} setItems={setInventoryItems} summary={inventorySummary} />
+        ) : null}
+        {tab === "activity" ? <ActivityPanel auditEvents={auditEvents} /> : null}
       </section>
     </main>
   );
 }
 
-function DashboardPanel({ metrics, companyName }: { metrics: DashboardMetrics | null; companyName: string }) {
+function FinancialYearSelector(props: {
+  selectedFinancialYear: string;
+  customFinancialYear: string;
+  setSelectedFinancialYear: (value: string) => void;
+  setCustomFinancialYear: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row">
+      <select
+        className="premium-select text-slate-900"
+        value={props.selectedFinancialYear}
+        onChange={(event) => props.setSelectedFinancialYear(event.target.value)}
+        title="Financial year"
+      >
+        {financialYears.map((year) => (
+          <option key={year} value={year}>
+            {year}
+          </option>
+        ))}
+      </select>
+      {props.selectedFinancialYear === "Custom FY" ? (
+        <Input
+          className="bg-white text-slate-900"
+          value={props.customFinancialYear}
+          onChange={(event) => props.setCustomFinancialYear(event.target.value)}
+          placeholder="Custom FY"
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function DashboardPanel({
+  metrics,
+  companyName,
+  activeFinancialYear,
+  voucherCount,
+  inventorySummary
+}: {
+  metrics: DashboardMetrics | null;
+  companyName: string;
+  activeFinancialYear: string;
+  voucherCount: number;
+  inventorySummary: { items: number; closingStock: number; stockValue: number };
+}) {
   const cards: Array<[string, string | undefined, LucideIcon]> = [
     ["Revenue", metrics?.revenue, ReceiptIndianRupee],
     ["Expenses", metrics?.expenses, FileText],
@@ -447,7 +585,15 @@ function DashboardPanel({ metrics, companyName }: { metrics: DashboardMetrics | 
   return (
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       <div className="sm:col-span-2 xl:col-span-3">
-        <h2 className="text-lg font-semibold">{companyName}</h2>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">{companyName}</h2>
+            <p className="text-sm text-muted-foreground">
+              {activeFinancialYear} Alpha view · {voucherCount} vouchers in selected FY where client-side filtering applies
+            </p>
+          </div>
+          <span className="ai-badge w-fit">Multi-Year Alpha</span>
+        </div>
       </div>
       {cards.map(([label, value, Icon]) => (
         <div key={String(label)} className="glass-card float-card p-4">
@@ -458,6 +604,22 @@ function DashboardPanel({ metrics, companyName }: { metrics: DashboardMetrics | 
           <p className="mt-3 text-2xl font-semibold">{formatMoney(value)}</p>
         </div>
       ))}
+      <div className="glass-card float-card p-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">Inventory Alpha Items</p>
+          <span className="rounded-xl bg-orange-50 p-2 text-primary"><Package size={18} aria-hidden="true" /></span>
+        </div>
+        <p className="mt-3 text-2xl font-semibold">{inventorySummary.items}</p>
+        <p className="mt-1 text-xs text-muted-foreground">Closing stock {inventorySummary.closingStock}</p>
+      </div>
+      <div className="glass-card float-card p-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">Stock Value Alpha</p>
+          <span className="rounded-xl bg-orange-50 p-2 text-primary"><CalendarDays size={18} aria-hidden="true" /></span>
+        </div>
+        <p className="mt-3 text-2xl font-semibold">{formatMoney(inventorySummary.stockValue)}</p>
+        <p className="mt-1 text-xs text-muted-foreground">Basic local Alpha valuation</p>
+      </div>
     </section>
   );
 }
@@ -572,49 +734,100 @@ function LedgersPanel(props: {
   );
 }
 
-function VouchersPanel({ ledgers, onPost }: { ledgers: Ledger[]; onPost: (payload: unknown) => Promise<unknown> | false | null }) {
+function VouchersPanel({
+  ledgers,
+  vouchers,
+  activeFinancialYear,
+  onPost
+}: {
+  ledgers: Ledger[];
+  vouchers: Voucher[];
+  activeFinancialYear: string;
+  onPost: (payload: unknown) => Promise<unknown> | false | null;
+}) {
   const [voucherType, setVoucherType] = useState<VoucherType>("journal");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [debitLedger, setDebitLedger] = useState("");
   const [creditLedger, setCreditLedger] = useState("");
   const [amount, setAmount] = useState("");
   const balanced = Number(amount) > 0 && debitLedger !== creditLedger;
+  const cashLedger = ledgers.find((ledger) => ledger.category === "cash")?.id ?? "";
+  const expenseLedger = ledgers.find((ledger) => ledger.account_nature === "expense")?.id ?? "";
+
+  function useExpenseTemplate() {
+    setVoucherType("payment");
+    setDebitLedger(expenseLedger);
+    setCreditLedger(cashLedger);
+  }
+
   return (
-    <form className="glass-card p-4" onSubmit={(event) => {
-      event.preventDefault();
-      void onPost({
-        voucher_type: voucherType,
-        voucher_date: date,
-        narration: `${title(voucherType)} voucher`,
-        lines: [
-          { ledger_id: debitLedger, debit: amount, credit: "0.00" },
-          { ledger_id: creditLedger, debit: "0.00", credit: amount }
-        ]
-      });
-    }}>
-      <h2 className="mb-3 text-base font-semibold">Voucher Engine</h2>
-      <div className="grid gap-3 md:grid-cols-5">
-        <select className="premium-select h-11" value={voucherType} onChange={(event) => setVoucherType(event.target.value as VoucherType)}>
-          {voucherTypes.map((item) => <option key={item} value={item}>{title(item)}</option>)}
-        </select>
-        <Input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
-        <select className="premium-select h-11" value={debitLedger} onChange={(event) => setDebitLedger(event.target.value)} required>
-          <option value="">Debit ledger</option>
-          {ledgers.map((ledger) => <option key={ledger.id} value={ledger.id}>{ledger.name}</option>)}
-        </select>
-        <select className="premium-select h-11" value={creditLedger} onChange={(event) => setCreditLedger(event.target.value)} required>
-          <option value="">Credit ledger</option>
-          {ledgers.map((ledger) => <option key={ledger.id} value={ledger.id}>{ledger.name}</option>)}
-        </select>
-        <Input type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Amount" required />
+    <section className="grid gap-4 xl:grid-cols-[1fr_420px]">
+      <form className="glass-card p-4" onSubmit={(event) => {
+        event.preventDefault();
+        void onPost({
+          voucher_type: voucherType,
+          voucher_date: date,
+          narration: `${title(voucherType)} voucher`,
+          lines: [
+            { ledger_id: debitLedger, debit: amount, credit: "0.00" },
+            { ledger_id: creditLedger, debit: "0.00", credit: amount }
+          ]
+        });
+      }}>
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Voucher Engine</h2>
+            <p className="text-sm text-muted-foreground">
+              Sales, purchase, payment, receipt, journal, contra and expense entries use double-entry validation.
+            </p>
+          </div>
+          <Button type="button" variant="secondary" onClick={useExpenseTemplate} disabled={!cashLedger || !expenseLedger}>
+            Expense Entry
+          </Button>
+        </div>
+        <div className="grid gap-3 md:grid-cols-5">
+          <select className="premium-select h-11" value={voucherType} onChange={(event) => setVoucherType(event.target.value as VoucherType)}>
+            {voucherTypes.map((item) => <option key={item} value={item}>{title(item)}</option>)}
+          </select>
+          <Input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
+          <select className="premium-select h-11" value={debitLedger} onChange={(event) => setDebitLedger(event.target.value)} required>
+            <option value="">Debit ledger</option>
+            {ledgers.map((ledger) => <option key={ledger.id} value={ledger.id}>{ledger.name}</option>)}
+          </select>
+          <select className="premium-select h-11" value={creditLedger} onChange={(event) => setCreditLedger(event.target.value)} required>
+            <option value="">Credit ledger</option>
+            {ledgers.map((ledger) => <option key={ledger.id} value={ledger.id}>{ledger.name}</option>)}
+          </select>
+          <Input type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Amount" required />
+        </div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className={cn("text-sm", balanced ? "text-primary" : "text-destructive")}>
+            Debit total and credit total must match before posting.
+          </p>
+          <Button type="submit" disabled={!balanced}><ReceiptIndianRupee size={17} /> Post voucher</Button>
+        </div>
+      </form>
+      <div className="glass-card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Recent Vouchers</h2>
+            <p className="text-xs text-muted-foreground">{activeFinancialYear} client-side Alpha filter</p>
+          </div>
+          <span className="ai-badge">FY Alpha</span>
+        </div>
+        <div className="max-h-[360px] space-y-2 overflow-auto pr-1">
+          {vouchers.length ? vouchers.map((voucher) => (
+            <div key={voucher.id} className="rounded-xl border border-white/70 bg-white/70 p-3 text-sm shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-semibold">{voucher.voucher_number}</p>
+                <span className="rounded-full bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">{title(voucher.voucher_type)}</span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{voucher.voucher_date} · {voucher.status}</p>
+            </div>
+          )) : <p className="empty-state">No vouchers found for this financial year view.</p>}
+        </div>
       </div>
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className={cn("text-sm", balanced ? "text-primary" : "text-destructive")}>
-          Debit total and credit total must match before posting.
-        </p>
-        <Button type="submit" disabled={!balanced}><ReceiptIndianRupee size={17} /> Post voucher</Button>
-      </div>
-    </form>
+    </section>
   );
 }
 
@@ -627,7 +840,15 @@ function InvoicesPanel(props: {
 }) {
   const [partyLedgerId, setPartyLedgerId] = useState("");
   const [amount, setAmount] = useState("");
+  const [gstSupplyType, setGstSupplyType] = useState<"intra_state" | "inter_state">("intra_state");
+  const [gstRate, setGstRate] = useState("18");
+  const [hsnSac, setHsnSac] = useState("");
   const invoiceNumber = useMemo(() => `INV-${Date.now()}`, []);
+  const taxableAmount = Number(amount || 0);
+  const taxAmount = (taxableAmount * Number(gstRate || 0)) / 100;
+  const cgstAmount = gstSupplyType === "intra_state" ? taxAmount / 2 : 0;
+  const sgstAmount = gstSupplyType === "intra_state" ? taxAmount / 2 : 0;
+  const igstAmount = gstSupplyType === "inter_state" ? taxAmount : 0;
   return (
     <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
       <form className="glass-card p-4" onSubmit={(event) => {
@@ -637,8 +858,8 @@ function InvoicesPanel(props: {
           invoice_number: invoiceNumber,
           invoice_date: new Date().toISOString().slice(0, 10),
           party_ledger_id: partyLedgerId,
-          gst_supply_type: "intra_state",
-          lines: [{ description: "Accounting invoice line", quantity: "1", unit: "NOS", unit_price: amount, gst_rate: "18.00" }]
+          gst_supply_type: gstSupplyType,
+          lines: [{ description: "Accounting invoice line", hsn_sac: hsnSac || null, quantity: "1", unit: "NOS", unit_price: amount, gst_rate: gstRate }]
         });
       }}>
         <h2 className="mb-3 text-base font-semibold">Sales Invoice</h2>
@@ -646,7 +867,25 @@ function InvoicesPanel(props: {
           <option value="">Party ledger</option>
           {props.ledgers.map((ledger) => <option key={ledger.id} value={ledger.id}>{ledger.name}</option>)}
         </select>
+        <Input className="mt-3" value={hsnSac} onChange={(event) => setHsnSac(event.target.value.toUpperCase())} placeholder="HSN/SAC optional" />
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <select className="premium-select h-11" value={gstSupplyType} onChange={(event) => setGstSupplyType(event.target.value as "intra_state" | "inter_state")}>
+            <option value="intra_state">Intra-state CGST/SGST</option>
+            <option value="inter_state">Inter-state IGST</option>
+          </select>
+          <select className="premium-select h-11" value={gstRate} onChange={(event) => setGstRate(event.target.value)}>
+            <option value="0">GST 0%</option>
+            <option value="5">GST 5%</option>
+            <option value="12">GST 12%</option>
+            <option value="18">GST 18%</option>
+            <option value="28">GST 28%</option>
+          </select>
+        </div>
         <Input className="mt-3" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Taxable amount" required />
+        <div className="mt-3 rounded-2xl border border-orange-100 bg-orange-50/70 p-3 text-sm text-orange-900">
+          <p className="font-semibold">GST Split Preview</p>
+          <p className="mt-1">CGST {formatMoney(cgstAmount)} · SGST {formatMoney(sgstAmount)} · IGST {formatMoney(igstAmount)}</p>
+        </div>
         <Button className="mt-3 w-full" type="submit"><Plus size={17} /> Create invoice</Button>
       </form>
       <div className="glass-card p-4">
@@ -696,7 +935,7 @@ function ReportsPanel(props: {
 function GstPanel({ gstReport }: { gstReport: GstReport | null }) {
   return (
     <section className="space-y-3">
-      <p className="empty-state">ABHAY provides GST assistance. Please verify before filing.</p>
+      <p className="empty-state">GST assistance only. Verify with CA before filing.</p>
       <div className="glass-card p-4">
         <h2 className="mb-3 text-base font-semibold">GST category/rate structure</h2>
         <div className="flex flex-wrap gap-2">
@@ -706,7 +945,19 @@ function GstPanel({ gstReport }: { gstReport: GstReport | null }) {
             </span>
           ))}
         </div>
-        <p className="mt-3 text-sm text-muted-foreground">Rate mapping is an Alpha assistance layer. Verify with CA before filing.</p>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Intra-state invoices split tax into CGST/SGST. Inter-state invoices use IGST. Rate mapping is an Alpha assistance layer.
+        </p>
+      </div>
+      <div className="glass-card p-4">
+        <h2 className="mb-3 text-base font-semibold">GST State Codes</h2>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {gstStates.map(([code, name]) => (
+            <span key={code} className="rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm shadow-sm">
+              {code} {name}
+            </span>
+          ))}
+        </div>
       </div>
       <Statement
         title="GST-ready insights"
@@ -789,6 +1040,187 @@ function AccessRequestsPanel(props: {
       </div>
     </section>
   );
+}
+
+function InventoryPanel({
+  items,
+  setItems,
+  summary
+}: {
+  items: InventoryItem[];
+  setItems: (items: InventoryItem[]) => void;
+  summary: { items: number; closingStock: number; stockValue: number };
+}) {
+  const [name, setName] = useState("");
+  const [unit, setUnit] = useState("PCS");
+  const [hsnSac, setHsnSac] = useState("");
+  const [openingStock, setOpeningStock] = useState("0");
+  const [purchaseStock, setPurchaseStock] = useState("0");
+  const [salesStock, setSalesStock] = useState("0");
+  const [rate, setRate] = useState("0");
+
+  function addItem() {
+    if (!name.trim()) return;
+    setItems([
+      ...items,
+      {
+        id: `${Date.now()}`,
+        name: name.trim(),
+        unit: unit.trim() || "PCS",
+        hsnSac: hsnSac.trim(),
+        openingStock: Number(openingStock || 0),
+        purchaseStock: Number(purchaseStock || 0),
+        salesStock: Number(salesStock || 0),
+        rate: Number(rate || 0)
+      }
+    ]);
+    setName("");
+    setHsnSac("");
+    setOpeningStock("0");
+    setPurchaseStock("0");
+    setSalesStock("0");
+    setRate("0");
+  }
+
+  return (
+    <section className="grid gap-4 xl:grid-cols-[380px_1fr]">
+      <form
+        className="glass-card p-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          addItem();
+        }}
+      >
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold">Item Master</h2>
+          <span className="ai-badge">Inventory Alpha</span>
+        </div>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Basic stock register for HSN/SAC, opening, purchase, sales, closing stock, and stock value.
+        </p>
+        <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Item name" required />
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Input value={unit} onChange={(event) => setUnit(event.target.value.toUpperCase())} placeholder="Unit" />
+          <Input value={hsnSac} onChange={(event) => setHsnSac(event.target.value.toUpperCase())} placeholder="HSN/SAC" />
+          <Input type="number" value={openingStock} onChange={(event) => setOpeningStock(event.target.value)} placeholder="Opening stock" />
+          <Input type="number" value={purchaseStock} onChange={(event) => setPurchaseStock(event.target.value)} placeholder="Purchase stock" />
+          <Input type="number" value={salesStock} onChange={(event) => setSalesStock(event.target.value)} placeholder="Sales stock" />
+          <Input type="number" value={rate} onChange={(event) => setRate(event.target.value)} placeholder="Rate" />
+        </div>
+        <Button className="mt-3 w-full" type="submit">
+          <Package size={17} />
+          Add item
+        </Button>
+      </form>
+      <div className="glass-card p-4">
+        <div className="mb-3 grid gap-3 sm:grid-cols-3">
+          <MiniStat label="Items" value={summary.items} />
+          <MiniStat label="Closing Stock" value={summary.closingStock} />
+          <MiniStat label="Stock Value" value={formatMoney(summary.stockValue)} />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="text-muted-foreground">
+              <tr><th className="py-2">Item</th><th>Unit</th><th>HSN/SAC</th><th>Opening</th><th>Purchase</th><th>Sales</th><th>Closing</th><th>Value</th><th></th></tr>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const closing = closingStock(item);
+                return (
+                  <tr key={item.id} className="border-t">
+                    <td className="py-2 font-medium">{item.name}</td>
+                    <td>{item.unit}</td>
+                    <td>{item.hsnSac || "-"}</td>
+                    <td>{item.openingStock}</td>
+                    <td>{item.purchaseStock}</td>
+                    <td>{item.salesStock}</td>
+                    <td>{closing}</td>
+                    <td>{formatMoney(closing * item.rate)}</td>
+                    <td className="text-right">
+                      <Button type="button" variant="ghost" onClick={() => setItems(items.filter((row) => row.id !== item.id))} title="Delete item">
+                        <Trash2 size={16} />
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!items.length ? <p className="empty-state mt-3">Inventory Alpha is ready. Add an item to start basic stock tracking.</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function ActivityPanel({ auditEvents }: { auditEvents: AuditEvent[] }) {
+  return (
+    <section className="glass-card p-4">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="rounded-xl bg-orange-50 p-2 text-primary"><Activity size={18} /></span>
+          <div>
+            <h2 className="text-base font-semibold">Recent Activity</h2>
+            <p className="text-sm text-muted-foreground">Audit Trail Alpha: who changed what, action type, entity and timestamp.</p>
+          </div>
+        </div>
+        <span className="ai-badge w-fit">Audit Alpha</span>
+      </div>
+      <div className="space-y-2">
+        {auditEvents.length ? auditEvents.map((event) => (
+          <div key={event.id} className="rounded-2xl border border-white/70 bg-white/70 p-3 text-sm shadow-sm">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="font-semibold">{title(event.action_type)}</p>
+                <p className="text-muted-foreground">
+                  {event.entity_type} {event.summary} · changed by {event.created_by ?? "system"}
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground">{new Date(event.created_at).toLocaleString("en-IN")}</p>
+            </div>
+          </div>
+        )) : <p className="empty-state">No audit events yet. Voucher and invoice postings will appear here.</p>}
+      </div>
+    </section>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-2xl border border-white/70 bg-white/70 p-3 shadow-sm">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-lg font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function closingStock(item: InventoryItem) {
+  return item.openingStock + item.purchaseStock - item.salesStock;
+}
+
+function summarizeInventory(items: InventoryItem[]) {
+  return items.reduce(
+    (summary, item) => {
+      const closing = closingStock(item);
+      return {
+        items: summary.items + 1,
+        closingStock: summary.closingStock + closing,
+        stockValue: summary.stockValue + closing * item.rate
+      };
+    },
+    { items: 0, closingStock: 0, stockValue: 0 }
+  );
+}
+
+function isVoucherInFinancialYear(voucherDate: string, selectedFinancialYear: string, customFinancialYear: string) {
+  const parsed = new Date(voucherDate);
+  if (Number.isNaN(parsed.getTime())) return true;
+  const year = parsed.getFullYear();
+  const month = parsed.getMonth() + 1;
+  const fyLabel = month >= 4 ? `FY ${year}-${String(year + 1).slice(2)}` : `FY ${year - 1}-${String(year).slice(2)}`;
+  if (selectedFinancialYear !== "Custom FY") return fyLabel === selectedFinancialYear;
+  const custom = customFinancialYear.trim().toLowerCase();
+  return custom ? fyLabel.toLowerCase().includes(custom.replace("fy", "").trim()) || custom.includes(String(year)) : true;
 }
 
 function Statement({ title: heading, rows }: { title: string; rows: Array<[string, string | undefined]> }) {

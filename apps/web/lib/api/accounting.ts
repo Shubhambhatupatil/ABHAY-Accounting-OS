@@ -98,6 +98,18 @@ export type Voucher = {
   }>;
 };
 
+export type AuditEvent = {
+  id: string;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string | null;
+  action_type: string;
+  entity_type: string;
+  entity_id: string;
+  summary: string;
+};
+
 export type DashboardMetrics = {
   revenue: string;
   expenses: string;
@@ -242,6 +254,8 @@ export const accountingApi = {
     api<Voucher[]>(`/companies/${companyId}/vouchers`, { token }),
   createVoucher: (companyId: string, token: string, body: unknown) =>
     api<Voucher>(`/companies/${companyId}/vouchers`, { token, method: "POST", body }),
+  auditEvents: (companyId: string, token: string) =>
+    api<AuditEvent[]>(`/companies/${companyId}/audit-events`, { token }),
   dashboard: (companyId: string, token: string) =>
     api<DashboardMetrics>(`/companies/${companyId}/reports/dashboard`, { token }),
   trialBalance: (companyId: string, token: string) =>

@@ -32,7 +32,7 @@ const importOptions = [
     title: "Import from Excel",
     description: "Upload ledgers, opening balances, invoices, and voucher sheets for Alpha review.",
     status: "Alpha Ready UI",
-    badge: "Ready",
+    badge: "Alpha",
     accept: ".xlsx,.xls",
     icon: FileSpreadsheet
   },

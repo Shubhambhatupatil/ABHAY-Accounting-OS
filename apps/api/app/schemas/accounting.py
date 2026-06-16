@@ -146,6 +146,18 @@ class VoucherResponse(BaseModel):
     lines: list[VoucherLineResponse]
 
 
+class AuditEventResponse(BaseModel):
+    id: UUID
+    created_by: UUID | None = None
+    updated_by: UUID | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+    action_type: str
+    entity_type: str
+    entity_id: UUID
+    summary: str
+
+
 class TrialBalanceRow(BaseModel):
     ledger_id: UUID
     ledger_name: str

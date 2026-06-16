@@ -14,6 +14,7 @@ from app.schemas.accounting import (
     AccessRequestCreate,
     AccessRequestDecision,
     AccessRequestResponse,
+    AuditEventResponse,
     BalanceSheetResponse,
     CashFlowResponse,
     CompanyCreate,
@@ -410,6 +411,29 @@ def create_voucher(
     except AccountingValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return voucher_response(voucher)
+
+
+@router.get("/companies/{company_id}/audit-events", response_model=list[AuditEventResponse])
+def list_audit_events(
+    company_id: UUID,
+    user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[AuditEventResponse]:
+    repo = repo_for_company(company_id, user, db)
+    return [
+        AuditEventResponse(
+            id=event.id,
+            created_by=event.actor_id,
+            updated_by=event.actor_id,
+            created_at=event.created_at,
+            updated_at=None,
+            action_type=event.event_type,
+            entity_type="voucher",
+            entity_id=event.voucher_id,
+            summary=str(event.event_payload.get("voucher_number", event.event_type)),
+        )
+        for event in repo.list_audit_events(company_id)
+    ]
 
 
 @router.get("/companies/{company_id}/reports/trial-balance", response_model=list[TrialBalanceRow])

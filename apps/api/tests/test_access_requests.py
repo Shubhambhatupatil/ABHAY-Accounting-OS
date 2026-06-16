@@ -83,6 +83,19 @@ class FakeAccountingRepository:
         if profile_id != OWNER_ID and profile_id not in FakeAccountingRepository.approved_members:
             raise PermissionError("You do not have access to this company.")
 
+    def list_audit_events(self, company_id: UUID, limit: int = 20) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(
+                id=uuid4(),
+                company_id=company_id,
+                voucher_id=uuid4(),
+                actor_id=OWNER_ID,
+                event_type="voucher.posted",
+                event_payload={"voucher_number": "PAYMENT-000001"},
+                created_at=datetime.now(timezone.utc),
+            )
+        ]
+
 
 def access_request(
     company_id: UUID,
@@ -200,3 +213,19 @@ def test_non_owner_cannot_approve_access_request(monkeypatch) -> None:
     )
 
     assert response.status_code == 403
+
+
+def test_audit_events_endpoint_returns_recent_activity(monkeypatch) -> None:
+    company_id = FakeAccountingRepository.company_id
+    client = client_for(override_user(OWNER_ID, "owner@abhay.test"), monkeypatch)
+
+    response = client.get(
+        f"/companies/{company_id}/audit-events",
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert rows[0]["action_type"] == "voucher.posted"
+    assert rows[0]["entity_type"] == "voucher"
+    assert rows[0]["summary"] == "PAYMENT-000001"

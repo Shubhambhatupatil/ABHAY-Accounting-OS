@@ -535,6 +535,16 @@ class AccountingRepository:
             )
         )
 
+    def list_audit_events(self, company_id: UUID, limit: int = 20) -> list[VoucherAuditEvent]:
+        return list(
+            self.db.scalars(
+                select(VoucherAuditEvent)
+                .where(VoucherAuditEvent.company_id == company_id)
+                .order_by(VoucherAuditEvent.created_at.desc())
+                .limit(limit)
+            )
+        )
+
     def ledger_balances(self, company_id: UUID) -> list[tuple[Ledger, Decimal, Decimal]]:
         from app.models.accounting import JournalEntry
 

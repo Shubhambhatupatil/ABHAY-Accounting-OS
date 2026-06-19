@@ -358,6 +358,7 @@ export function AiWorkbench() {
               {commandResult ? (
                 <div className="mt-4 rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
                   <p className="text-sm font-semibold text-[#F8FAFC]">{commandResult.summary}</p>
+                  {commandResult.base_amount != null ? <CommandCalculationPanel result={commandResult} /> : null}
                   <div className="mt-3 grid gap-2">
                     {commandResult.actions.map((action, index) => (
                       <p key={`${index}-${action}`} className="rounded-lg border border-[#1F2937] bg-[#0F172A] p-2 text-sm text-muted-foreground">
@@ -495,6 +496,36 @@ export function AiWorkbench() {
         </section>
       </section>
     </main>
+  );
+}
+
+function CommandCalculationPanel({ result }: { result: AiCommandResponse }) {
+  const rows = [
+    ["Base Amount", result.base_amount != null ? formatMoney(result.base_amount) : "-"],
+    [
+      "GST Amount",
+      result.gst_amount != null
+        ? `${formatMoney(result.gst_amount)}${result.gst_rate != null ? ` (${formatRate(result.gst_rate)}%)` : ""}`
+        : "GST rate needed"
+    ],
+    ["Total Amount", result.total != null ? formatMoney(result.total) : "Pending GST rate"]
+  ];
+
+  return (
+    <div className="mt-3 rounded-xl border border-[#00E5FF]/20 bg-[#00E5FF]/10 p-3">
+      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-sm font-semibold text-[#B9F7FF]">Accounting Calculation</h3>
+        {result.calculation ? <span className="text-xs text-muted-foreground">{result.calculation}</span> : null}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {rows.map(([label, value]) => (
+          <div key={label} className="rounded-lg border border-[#1F2937] bg-[#0F172A]/90 p-3">
+            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="mt-1 text-sm font-semibold text-[#F8FAFC]">{value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -674,6 +705,10 @@ function readFileBase64(file: File) {
 
 function formatMoney(value: string | number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(Number(value));
+}
+
+function formatRate(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function title(value: string) {

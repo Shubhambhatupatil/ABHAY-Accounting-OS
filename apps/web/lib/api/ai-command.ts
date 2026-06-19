@@ -3,6 +3,11 @@ export type AiCommandResponse = {
   summary: string;
   actions: string[];
   confidence: number;
+  calculation?: string | null;
+  base_amount?: number | null;
+  gst_rate?: number | null;
+  gst_amount?: number | null;
+  total?: number | null;
 };
 
 export async function runAiCommand(command: string, context: Record<string, unknown> = {}) {

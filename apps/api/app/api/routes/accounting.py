@@ -320,7 +320,7 @@ def create_ledger_group(
 ) -> LedgerGroupResponse:
     repo = repo_for_company(company_id, user, db)
     return LedgerGroupResponse.model_validate(
-        repo.create_group(company_id, payload.name, payload.account_nature)
+        repo.create_group(company_id, user_uuid(user), payload.name, payload.account_nature)
     )
 
 
@@ -349,7 +349,7 @@ def create_ledger(
     db: Session = Depends(get_db),
 ) -> LedgerResponse:
     repo = repo_for_company(company_id, user, db)
-    ledger = repo.create_ledger(company_id, payload)
+    ledger = repo.create_ledger(company_id, user_uuid(user), payload)
     row = db.execute(repo.ledger_query(company_id).where(ledger.__class__.id == ledger.id)).one()
     return ledger_response(row)
 
@@ -364,7 +364,7 @@ def update_ledger(
 ) -> LedgerResponse:
     repo = repo_for_company(company_id, user, db)
     try:
-        ledger = repo.update_ledger(company_id, ledger_id, payload)
+        ledger = repo.update_ledger(company_id, user_uuid(user), ledger_id, payload)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     row = db.execute(repo.ledger_query(company_id).where(ledger.__class__.id == ledger.id)).one()
@@ -380,7 +380,7 @@ def delete_ledger(
 ) -> Response:
     repo = repo_for_company(company_id, user, db)
     try:
-        repo.delete_ledger(company_id, ledger_id)
+        repo.delete_ledger(company_id, user_uuid(user), ledger_id)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:

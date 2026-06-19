@@ -36,7 +36,11 @@ def get_engine() -> Engine:
 
 def create_alpha_schema_if_needed() -> None:
     settings = get_settings()
-    if not settings.alpha_demo_mode and not is_sqlite_database_url(settings.database_url):
+    if (
+        settings.app_env != "local"
+        and not settings.alpha_demo_mode
+        and not is_sqlite_database_url(settings.database_url)
+    ):
         return
     import app.models.accounting  # noqa: F401
 

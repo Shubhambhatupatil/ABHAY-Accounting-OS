@@ -55,7 +55,6 @@ type InventoryItem = {
 export const LAST_COMPANY_KEY = "abhay.lastCompanyId";
 const FINANCIAL_YEAR_KEY = "abhay.selectedFinancialYear";
 const CUSTOM_FINANCIAL_YEAR_KEY = "abhay.customFinancialYear";
-const INVENTORY_ALPHA_KEY = "abhay.inventoryAlpha";
 
 const natures: AccountNature[] = ["asset", "liability", "income", "expense", "equity"];
 const categories: LedgerCategory[] = [
@@ -145,25 +144,6 @@ export function AccountingWorkspace() {
     window.localStorage.setItem(FINANCIAL_YEAR_KEY, selectedFinancialYear);
     window.localStorage.setItem(CUSTOM_FINANCIAL_YEAR_KEY, customFinancialYear);
   }, [customFinancialYear, selectedFinancialYear]);
-
-  useEffect(() => {
-    if (!companyId) return;
-    const stored = window.localStorage.getItem(`${INVENTORY_ALPHA_KEY}.${companyId}`);
-    if (!stored) {
-      setInventoryItems([]);
-      return;
-    }
-    try {
-      setInventoryItems(JSON.parse(stored) as InventoryItem[]);
-    } catch {
-      setInventoryItems([]);
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    if (!companyId) return;
-    window.localStorage.setItem(`${INVENTORY_ALPHA_KEY}.${companyId}`, JSON.stringify(inventoryItems));
-  }, [companyId, inventoryItems]);
 
   useEffect(() => {
     getAccessToken(supabase).then((accessToken) => {

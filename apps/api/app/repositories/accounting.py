@@ -16,7 +16,9 @@ from app.domain.accounting.invoices import (
 )
 from app.models.accounting import (
     AccountNature,
+    AccountingEntry,
     AccessRequestStatus,
+    AuditLog,
     BankAccount,
     BankStatement,
     BankTransaction,
@@ -45,9 +47,69 @@ from app.schemas.accounting import InvoiceCreate, InvoiceLineCreate, LedgerCreat
 from app.domain.banking.reconciliation import parse_bank_csv
 
 
+def json_safe(value):
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if hasattr(value, "value"):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    return value
+
+
 class AccountingRepository:
     def __init__(self, db: Session):
         self.db = db
+
+    def add_audit_log(
+        self,
+        company_id: UUID | None,
+        actor_id: UUID | None,
+        action_type: str,
+        entity_type: str,
+        entity_id: UUID | None,
+        payload: dict,
+    ) -> None:
+        self.db.add(
+            AuditLog(
+                id=uuid4(),
+                company_id=company_id,
+                actor_id=actor_id,
+                action_type=action_type,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                event_payload=json_safe(payload),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+
+    def add_accounting_entry_snapshot(
+        self,
+        company_id: UUID,
+        user_id: UUID,
+        voucher_id: UUID,
+        journal_entry_id: UUID,
+        entry_type: str,
+        payload: dict,
+    ) -> None:
+        self.db.add(
+            AccountingEntry(
+                id=uuid4(),
+                company_id=company_id,
+                voucher_id=voucher_id,
+                journal_entry_id=journal_entry_id,
+                entry_type=entry_type,
+                payload=json_safe(payload),
+                created_by=user_id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
 
     def ensure_member(self, company_id: UUID, profile_id: UUID) -> None:
         member = self.db.scalar(
@@ -125,6 +187,14 @@ class AccountingRepository:
             )
         )
         self.create_default_accounting_ledgers(company.id)
+        self.add_audit_log(
+            company.id,
+            user_id,
+            "company.created",
+            "company",
+            company.id,
+            {"legal_name": company.legal_name, "trade_name": company.trade_name},
+        )
         self.db.commit()
         self.db.refresh(company)
         return company
@@ -162,6 +232,14 @@ class AccountingRepository:
             )
         )
         self.create_default_accounting_ledgers(company.id)
+        self.add_audit_log(
+            company.id,
+            user_id,
+            "company.created",
+            "company",
+            company.id,
+            {"legal_name": company.legal_name, "trade_name": company.trade_name},
+        )
         self.db.commit()
         self.db.refresh(company)
         return company
@@ -211,6 +289,14 @@ class AccountingRepository:
         else:
             request.requested_role = requested_role
             request.requester_email = requester_email
+        self.add_audit_log(
+            company_id,
+            requester_id,
+            "access_request.created",
+            "company_access_request",
+            request.id,
+            {"requested_role": requested_role, "requester_email": requester_email},
+        )
         self.db.commit()
         self.db.refresh(request)
         return request
@@ -272,6 +358,14 @@ class AccountingRepository:
             request.requested_role = role_code
         else:
             request.status = AccessRequestStatus.rejected
+        self.add_audit_log(
+            company_id,
+            owner_id,
+            f"access_request.{decision}",
+            "company_access_request",
+            request.id,
+            {"role": role_code, "requester_profile_id": str(request.requester_profile_id)},
+        )
         self.db.commit()
         self.db.refresh(request)
         return request
@@ -371,7 +465,7 @@ class AccountingRepository:
             )
         )
 
-    def create_group(self, company_id: UUID, name: str, nature: AccountNature) -> LedgerGroup:
+    def create_group(self, company_id: UUID, user_id: UUID, name: str, nature: AccountNature) -> LedgerGroup:
         group = LedgerGroup(
             id=uuid4(),
             company_id=company_id,
@@ -381,6 +475,14 @@ class AccountingRepository:
             is_system=False,
         )
         self.db.add(group)
+        self.add_audit_log(
+            company_id,
+            user_id,
+            "ledger_group.created",
+            "ledger_group",
+            group.id,
+            {"name": group.name, "account_nature": group.account_nature.value},
+        )
         self.db.commit()
         self.db.refresh(group)
         return group
@@ -411,7 +513,7 @@ class AccountingRepository:
             query = query.where(Ledger.is_active.is_(True))
         return list(self.db.execute(query.order_by(Ledger.name)).all())
 
-    def create_ledger(self, company_id: UUID, payload: LedgerCreate) -> Ledger:
+    def create_ledger(self, company_id: UUID, user_id: UUID, payload: LedgerCreate) -> Ledger:
         ledger = Ledger(
             id=uuid4(),
             company_id=company_id,
@@ -427,11 +529,19 @@ class AccountingRepository:
             is_active=True,
         )
         self.db.add(ledger)
+        self.add_audit_log(
+            company_id,
+            user_id,
+            "ledger.created",
+            "ledger",
+            ledger.id,
+            {"name": ledger.name, "category": ledger.category.value},
+        )
         self.db.commit()
         self.db.refresh(ledger)
         return ledger
 
-    def update_ledger(self, company_id: UUID, ledger_id: UUID, payload: LedgerUpdate) -> Ledger:
+    def update_ledger(self, company_id: UUID, user_id: UUID, ledger_id: UUID, payload: LedgerUpdate) -> Ledger:
         ledger = self.db.scalar(
             select(Ledger).where(Ledger.company_id == company_id, Ledger.id == ledger_id)
         )
@@ -439,11 +549,19 @@ class AccountingRepository:
             raise LookupError("Ledger not found.")
         for key, value in payload.model_dump(exclude_unset=True).items():
             setattr(ledger, key, value)
+        self.add_audit_log(
+            company_id,
+            user_id,
+            "ledger.updated",
+            "ledger",
+            ledger.id,
+            payload.model_dump(exclude_unset=True),
+        )
         self.db.commit()
         self.db.refresh(ledger)
         return ledger
 
-    def delete_ledger(self, company_id: UUID, ledger_id: UUID) -> None:
+    def delete_ledger(self, company_id: UUID, user_id: UUID, ledger_id: UUID) -> None:
         ledger = self.db.scalar(
             select(Ledger).where(Ledger.company_id == company_id, Ledger.id == ledger_id)
         )
@@ -452,6 +570,14 @@ class AccountingRepository:
         if ledger.is_system:
             raise ValueError("System ledgers cannot be deleted.")
         ledger.is_active = False
+        self.add_audit_log(
+            company_id,
+            user_id,
+            "ledger.deleted",
+            "ledger",
+            ledger.id,
+            {"name": ledger.name, "soft_delete": True},
+        )
         self.db.commit()
 
     def create_voucher(self, company_id: UUID, user_id: UUID, payload: VoucherCreate) -> Voucher:
@@ -484,17 +610,31 @@ class AccountingRepository:
         self.db.add(voucher)
         self.db.flush()
         for index, line in enumerate(lines, start=1):
-            self.db.add(
-                __import__("app.models.accounting", fromlist=["JournalEntry"]).JournalEntry(
-                    id=uuid4(),
-                    company_id=company_id,
-                    voucher_id=voucher.id,
-                    ledger_id=line.ledger_id,
-                    line_number=index,
-                    debit=line.debit,
-                    credit=line.credit,
-                    narration=line.narration,
-                )
+            entry = JournalEntry(
+                id=uuid4(),
+                company_id=company_id,
+                voucher_id=voucher.id,
+                ledger_id=line.ledger_id,
+                line_number=index,
+                debit=line.debit,
+                credit=line.credit,
+                narration=line.narration,
+            )
+            self.db.add(entry)
+            self.add_accounting_entry_snapshot(
+                company_id,
+                user_id,
+                voucher.id,
+                entry.id,
+                "voucher_line",
+                {
+                    "voucher_number": number,
+                    "ledger_id": line.ledger_id,
+                    "line_number": index,
+                    "debit": line.debit,
+                    "credit": line.credit,
+                    "narration": line.narration,
+                },
             )
         self.db.add(
             VoucherAuditEvent(
@@ -506,6 +646,14 @@ class AccountingRepository:
                 event_payload={"voucher_number": number, "voucher_type": payload.voucher_type.value},
                 created_at=datetime.now(timezone.utc),
             )
+        )
+        self.add_audit_log(
+            company_id,
+            user_id,
+            "voucher.created",
+            "voucher",
+            voucher.id,
+            {"voucher_number": number, "voucher_type": payload.voucher_type.value},
         )
         self.db.commit()
         return self.get_voucher(company_id, voucher.id)
@@ -620,6 +768,19 @@ class AccountingRepository:
         invoice.total_amount = totals.total_amount
         voucher = self.create_invoice_voucher(company_id, user_id, invoice, payload.invoice_type, totals)
         invoice.voucher_id = voucher.id
+        self.add_audit_log(
+            company_id,
+            user_id,
+            "invoice.created",
+            "invoice",
+            invoice.id,
+            {
+                "invoice_number": invoice.invoice_number,
+                "invoice_type": invoice.invoice_type.value,
+                "total_amount": invoice.total_amount,
+                "voucher_id": voucher.id,
+            },
+        )
         self.db.commit()
         self.db.refresh(invoice)
         return invoice
@@ -668,17 +829,32 @@ class AccountingRepository:
         self.db.add(voucher)
         self.db.flush()
         for index, line in enumerate(posting_lines, start=1):
-            self.db.add(
-                JournalEntry(
-                    id=uuid4(),
-                    company_id=company_id,
-                    voucher_id=voucher.id,
-                    ledger_id=line.ledger_id,
-                    line_number=index,
-                    debit=line.debit,
-                    credit=line.credit,
-                    narration=line.narration,
-                )
+            entry = JournalEntry(
+                id=uuid4(),
+                company_id=company_id,
+                voucher_id=voucher.id,
+                ledger_id=line.ledger_id,
+                line_number=index,
+                debit=line.debit,
+                credit=line.credit,
+                narration=line.narration,
+            )
+            self.db.add(entry)
+            self.add_accounting_entry_snapshot(
+                company_id,
+                user_id,
+                voucher.id,
+                entry.id,
+                "invoice_voucher_line",
+                {
+                    "invoice_number": invoice.invoice_number,
+                    "voucher_number": voucher.voucher_number,
+                    "ledger_id": line.ledger_id,
+                    "line_number": index,
+                    "debit": line.debit,
+                    "credit": line.credit,
+                    "narration": line.narration,
+                },
             )
         self.db.add(
             VoucherAuditEvent(
@@ -690,6 +866,14 @@ class AccountingRepository:
                 event_payload={"invoice_number": invoice.invoice_number},
                 created_at=datetime.now(timezone.utc),
             )
+        )
+        self.add_audit_log(
+            company_id,
+            user_id,
+            "invoice.voucher.created",
+            "voucher",
+            voucher.id,
+            {"invoice_number": invoice.invoice_number, "voucher_number": voucher.voucher_number},
         )
         return voucher
 
@@ -1003,11 +1187,11 @@ class AccountingRepository:
             )
         )
         groups = {
-            "Assets": self.create_group(company.id, "Assets", AccountNature.asset),
-            "Liabilities": self.create_group(company.id, "Liabilities", AccountNature.liability),
-            "Income": self.create_group(company.id, "Income", AccountNature.income),
-            "Expenses": self.create_group(company.id, "Expenses", AccountNature.expense),
-            "Equity": self.create_group(company.id, "Equity", AccountNature.equity),
+            "Assets": self.create_group(company.id, user_id, "Assets", AccountNature.asset),
+            "Liabilities": self.create_group(company.id, user_id, "Liabilities", AccountNature.liability),
+            "Income": self.create_group(company.id, user_id, "Income", AccountNature.income),
+            "Expenses": self.create_group(company.id, user_id, "Expenses", AccountNature.expense),
+            "Equity": self.create_group(company.id, user_id, "Equity", AccountNature.equity),
         }
         ledgers_to_create = [
             ("Cash", "Assets", LedgerCategory.cash, AccountNature.asset),
@@ -1029,6 +1213,7 @@ class AccountingRepository:
         for name, group_name, category, nature in ledgers_to_create:
             ledger = self.create_ledger(
                 company.id,
+                user_id,
                 LedgerCreate(
                     name=name,
                     ledger_group_id=groups[group_name].id,
@@ -1127,7 +1312,7 @@ class AccountingRepository:
         safe_email = email or f"{user_id}@abhay.test"
         safe_name = full_name or safe_email.split("@", 1)[0]
         try:
-            self.insert_profile_identity(user_id, safe_name)
+            self.insert_profile_identity(user_id, safe_name, safe_email)
             self.db.commit()
             return
         except IntegrityError:
@@ -1142,17 +1327,19 @@ class AccountingRepository:
             ),
             {"id": str(user_id), "email": safe_email, "full_name": safe_name},
         )
-        self.insert_profile_identity(user_id, safe_name)
+        self.insert_profile_identity(user_id, safe_name, safe_email)
         self.db.commit()
 
-    def insert_profile_identity(self, user_id: UUID, full_name: str) -> None:
+    def insert_profile_identity(self, user_id: UUID, full_name: str, email: str | None) -> None:
         self.db.execute(
             text(
                 """
-                insert into profiles (id, full_name)
-                values (:id, :full_name)
-                on conflict (id) do nothing
+                insert into profiles (id, full_name, email)
+                values (:id, :full_name, :email)
+                on conflict (id) do update
+                set full_name = coalesce(excluded.full_name, profiles.full_name),
+                    email = coalesce(excluded.email, profiles.email)
                 """
             ),
-            {"id": str(user_id), "full_name": full_name},
+            {"id": str(user_id), "full_name": full_name, "email": email},
         )

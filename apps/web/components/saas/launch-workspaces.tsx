@@ -294,10 +294,7 @@ export function ReportsWorkspace() {
       const filename = kind === "gstr1" ? "gstr1-draft.csv" : "gstr3b-draft.csv";
       const response = await fetch(`/api/reports/${kind}.csv?company_id=${encodeURIComponent(companyId)}`, {
         method: "GET",
-        cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        cache: "no-store"
       });
       if (!response.ok) {
         const error = await response.json().catch(() => ({ detail: "CSV download failed." })) as { detail?: string };

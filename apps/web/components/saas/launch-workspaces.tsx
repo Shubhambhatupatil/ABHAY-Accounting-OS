@@ -5,6 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BadgeCheck,
   Building2,
+  Calculator,
+  Download,
+  AlertTriangle,
   FileSearch,
   FileSpreadsheet,
   LockKeyhole,
@@ -21,6 +24,8 @@ import {
   SubscriptionStatusStrip,
   useSubscriptionState
 } from "@/components/subscription/subscription-gate";
+import { accountingApi, Company, LedgerScrutiny } from "@/lib/api/accounting";
+import { bankReconciliationApi } from "@/lib/api/bank-reconciliation";
 import {
   CompanyMember,
   CompanyRole,
@@ -31,6 +36,7 @@ import {
   updateCompanyMemberRole,
   WorkspaceCompany
 } from "@/lib/api/company-workspace";
+import { getAccessToken } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 
 const gstStates = [
@@ -158,24 +164,312 @@ export function EntriesLedgerWorkspace() {
 
 export function ReportsWorkspace() {
   const { subscription } = useSubscriptionState();
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const [token, setToken] = useState<string | null>(null);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyId, setCompanyId] = useState("");
+  const [trialBalance, setTrialBalance] = useState<Array<{ ledger_id: string; ledger_name: string; account_nature: string; category: string; debit: string; credit: string }>>([]);
+  const [pnl, setPnl] = useState<{ revenue: string; expenses: string; profit: string } | null>(null);
+  const [balanceSheet, setBalanceSheet] = useState<{ assets: string; liabilities: string; equity: string; check_difference: string } | null>(null);
+  const [cashFlow, setCashFlow] = useState<{ operating_cash_flow: string; investing_cash_flow: string; financing_cash_flow: string; net_cash_flow: string } | null>(null);
+  const [gst, setGst] = useState<{ input_gst: string; output_gst: string; net_payable: string } | null>(null);
+  const [scrutiny, setScrutiny] = useState<LedgerScrutiny | null>(null);
+  const [tds, setTds] = useState({ amount: "100000", rate: "10" });
+  const [pf, setPf] = useState({ wage: "15000", employeeRate: "12", employerRate: "12", ceiling: "15000" });
+  const [esic, setEsic] = useState({ wage: "21000", employeeRate: "0.75", employerRate: "3.25", limit: "21000" });
+  const [calculatorResult, setCalculatorResult] = useState<string>("Run a calculator to preview statutory deductions.");
+  const [bankImportStatus, setBankImportStatus] = useState("Upload bank CSV for stored reconciliation import.");
+  const [status, setStatus] = useState("Loading Launch Pack reports");
+  const [isBusy, setIsBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getAccessToken(supabase)
+      .then(async (accessToken) => {
+        if (!active) return;
+        setToken(accessToken);
+        if (!accessToken) {
+          setStatus("Please login or continue in Alpha Demo Mode.");
+          return;
+        }
+        const rows = await accountingApi.companies(accessToken);
+        if (!active) return;
+        setCompanies(rows);
+        setCompanyId(rows[0]?.id ?? "");
+        setStatus(rows.length ? "Select a company and refresh reports." : "No company found.");
+      })
+      .catch((error: Error) => {
+        if (active) setStatus(error.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [supabase]);
+
+  async function refreshReports(selectedCompanyId = companyId) {
+    if (!token || !selectedCompanyId) return;
+    setIsBusy(true);
+    try {
+      const [tb, pl, bs, cf, gstRow, scrutinyRow] = await Promise.all([
+        accountingApi.trialBalance(selectedCompanyId, token),
+        accountingApi.profitAndLoss(selectedCompanyId, token),
+        accountingApi.balanceSheet(selectedCompanyId, token),
+        accountingApi.cashFlow(selectedCompanyId, token),
+        accountingApi.gstReport(selectedCompanyId, token),
+        accountingApi.ledgerScrutiny(selectedCompanyId, token)
+      ]);
+      setTrialBalance(tb);
+      setPnl(pl);
+      setBalanceSheet(bs);
+      setCashFlow(cf);
+      setGst(gstRow);
+      setScrutiny(scrutinyRow);
+      setStatus("Launch Pack reports refreshed from stored accounting data.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to refresh reports.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (companyId) void refreshReports(companyId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  async function runTds() {
+    if (!token) return;
+    const result = await accountingApi.calculateTds(token, { amount: tds.amount, rate_percent: tds.rate });
+    setCalculatorResult(`TDS ${formatMoney(result.tds_amount)} | Net payable ${formatMoney(result.net_payable)}`);
+  }
+
+  async function runPf() {
+    if (!token) return;
+    const result = await accountingApi.calculatePf(token, {
+      monthly_basic_wage: pf.wage,
+      employee_rate_percent: pf.employeeRate,
+      employer_rate_percent: pf.employerRate,
+      wage_ceiling: pf.ceiling
+    });
+    setCalculatorResult(`PF employee ${formatMoney(result.employee_contribution)} + employer ${formatMoney(result.employer_contribution)} = ${formatMoney(result.total_contribution)}`);
+  }
+
+  async function runEsic() {
+    if (!token) return;
+    const result = await accountingApi.calculateEsic(token, {
+      monthly_gross_wage: esic.wage,
+      employee_rate_percent: esic.employeeRate,
+      employer_rate_percent: esic.employerRate,
+      wage_limit: esic.limit
+    });
+    setCalculatorResult(`${result.eligible ? "ESIC eligible" : "ESIC not eligible"} | Total ${formatMoney(result.total_contribution)}`);
+  }
+
+  async function uploadBankCsv(file: File | undefined) {
+    if (!file || !token || !companyId) return;
+    setIsBusy(true);
+    try {
+      const csv = await file.text();
+      const result = await bankReconciliationApi.upload(companyId, token, {
+        filename: file.name,
+        csv_content: csv,
+        bank_name: "Primary Bank"
+      });
+      setBankImportStatus(`Imported ${result.imported_count} bank transactions into reconciliation.`);
+      await refreshReports();
+    } catch (error) {
+      setBankImportStatus(error instanceof Error ? error.message : "Bank CSV import failed.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function downloadGstrCsv(kind: "gstr1" | "gstr3b") {
+    if (!token || !companyId) {
+      setStatus("Select a company before downloading GST draft CSV.");
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const filename = kind === "gstr1" ? "gstr1-draft.csv" : "gstr3b-draft.csv";
+      const response = await fetch(`/api/reports/${kind}.csv?company_id=${encodeURIComponent(companyId)}`, {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: "CSV download failed." })) as { detail?: string };
+        throw new Error(error.detail ?? "CSV download failed.");
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setStatus(`${filename} downloaded as draft CSV.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "CSV download failed.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   return (
     <PageFrame
       icon={FileSpreadsheet}
-      badge="Reports"
-      title="Finance Reports"
-      subtitle="Basic reports are available during trial. Exports and advanced drill-downs unlock on paid plans."
+      badge="Launch Pack • 21 June"
+      title="ABHAY Launch Reports"
+      subtitle="Trial Balance, P&L, Balance Sheet, Cash Flow, GST drafts, payroll calculators, bank import, and ledger scrutiny."
     >
       <SubscriptionStatusStrip subscription={subscription} />
       <SubscriptionGate subscription={subscription} feature="reports" title="Reports require trial or paid access">
-        <section className="grid gap-4 lg:grid-cols-4">
-          {[
-            ["Trial Balance", "Debit/credit equality and ledger balances."],
-            ["Profit & Loss", "Revenue, expenses, and current profit."],
-            ["Balance Sheet", "Assets, liabilities, equity, and difference check."],
-            ["GST Assistance", "Output tax, input tax, and net payable for CA review."]
-          ].map(([title, copy]) => <InfoCard key={title} title={title} copy={copy} />)}
+        <section className="glass-card grid gap-3 p-4 lg:grid-cols-[1fr_auto_auto_auto]">
+          <select className="premium-select h-11 w-full" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
+            <option value="">Select company</option>
+            {companies.map((company) => <option key={company.id} value={company.id}>{company.legal_name}</option>)}
+          </select>
+          <Button type="button" onClick={() => refreshReports()} disabled={isBusy || !companyId}>
+            <FileSpreadsheet size={17} />
+            Refresh Reports
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void downloadGstrCsv("gstr1")} disabled={isBusy || !companyId || !token}>
+            <Download size={16} />
+            GSTR-1 CSV
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void downloadGstrCsv("gstr3b")} disabled={isBusy || !companyId || !token}>
+            <Download size={16} />
+            GSTR-3B CSV
+          </Button>
         </section>
-        <p className="empty-state mt-4">GST assistance only. Verify with CA before filing. Open Dashboard â†’ Reports for live database-backed reports.</p>
+
+        <section className="grid gap-4 lg:grid-cols-4">
+          <MetricCard title="Revenue" value={formatMoney(pnl?.revenue)} copy="From stored income ledgers" />
+          <MetricCard title="Expenses" value={formatMoney(pnl?.expenses)} copy="From stored expense ledgers" />
+          <MetricCard title="Profit / Loss" value={formatMoney(pnl?.profit)} copy="Live P&L summary" />
+          <MetricCard title="GST Net Payable" value={formatMoney(gst?.net_payable)} copy="GST assistance only" />
+        </section>
+
+        <section className="grid gap-4 xl:grid-cols-3">
+          <StatementCard title="Balance Sheet" rows={[
+            ["Assets", formatMoney(balanceSheet?.assets)],
+            ["Liabilities", formatMoney(balanceSheet?.liabilities)],
+            ["Equity", formatMoney(balanceSheet?.equity)],
+            ["Check Difference", formatMoney(balanceSheet?.check_difference)]
+          ]} />
+          <StatementCard title="Cash Flow Summary" rows={[
+            ["Operating Cash Flow", formatMoney(cashFlow?.operating_cash_flow)],
+            ["Investing Cash Flow", formatMoney(cashFlow?.investing_cash_flow)],
+            ["Financing Cash Flow", formatMoney(cashFlow?.financing_cash_flow)],
+            ["Net Cash Flow", formatMoney(cashFlow?.net_cash_flow)]
+          ]} />
+          <StatementCard title="GST Summary Report" rows={[
+            ["Output Tax", formatMoney(gst?.output_gst)],
+            ["Input Tax", formatMoney(gst?.input_gst)],
+            ["Net Payable", formatMoney(gst?.net_payable)],
+            ["Filing Status", "Draft only"]
+          ]} />
+        </section>
+
+        <section className="glass-panel p-5">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-white">Trial Balance</h2>
+              <p className="mt-1 text-sm text-white/60">Generated from stored vouchers and ledger balances.</p>
+            </div>
+            <span className="rounded-full border border-[#14B8A6]/20 bg-[#14B8A6]/10 px-3 py-1 text-xs font-semibold text-[#9FF5EA]">
+              {trialBalance.length} ledgers
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="text-white/50"><tr><th className="py-2">Ledger</th><th>Nature</th><th>Category</th><th>Debit</th><th>Credit</th></tr></thead>
+              <tbody>
+                {trialBalance.map((row) => (
+                  <tr key={row.ledger_id} className="border-t border-white/10">
+                    <td className="py-3 font-medium text-white">{row.ledger_name}</td>
+                    <td className="text-white/60">{row.account_nature}</td>
+                    <td className="text-white/60">{row.category}</td>
+                    <td className="text-white/80">{formatMoney(row.debit)}</td>
+                    <td className="text-white/80">{formatMoney(row.credit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="glass-panel p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Calculator className="text-orange-200" size={20} />
+              <h2 className="text-base font-semibold text-white">TDS / PF / ESIC Calculators</h2>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <CalculatorBox title="TDS" fields={[
+                ["Amount", tds.amount, (value) => setTds({ ...tds, amount: value })],
+                ["Rate %", tds.rate, (value) => setTds({ ...tds, rate: value })]
+              ]} onRun={runTds} />
+              <CalculatorBox title="PF" fields={[
+                ["Wage", pf.wage, (value) => setPf({ ...pf, wage: value })],
+                ["Employee %", pf.employeeRate, (value) => setPf({ ...pf, employeeRate: value })],
+                ["Employer %", pf.employerRate, (value) => setPf({ ...pf, employerRate: value })],
+                ["Ceiling", pf.ceiling, (value) => setPf({ ...pf, ceiling: value })]
+              ]} onRun={runPf} />
+              <CalculatorBox title="ESIC" fields={[
+                ["Gross Wage", esic.wage, (value) => setEsic({ ...esic, wage: value })],
+                ["Employee %", esic.employeeRate, (value) => setEsic({ ...esic, employeeRate: value })],
+                ["Employer %", esic.employerRate, (value) => setEsic({ ...esic, employerRate: value })],
+                ["Limit", esic.limit, (value) => setEsic({ ...esic, limit: value })]
+              ]} onRun={runEsic} />
+            </div>
+            <p className="empty-state mt-4">{calculatorResult}</p>
+          </div>
+
+          <div className="glass-panel p-5">
+            <h2 className="text-base font-semibold text-white">Bank CSV Import</h2>
+            <p className="mt-2 text-sm leading-6 text-white/60">Imports into Bank Reconciliation using stored bank transaction tables.</p>
+            <Input className="mt-4" type="file" accept=".csv,text/csv" onChange={(event) => void uploadBankCsv(event.target.files?.[0])} disabled={isBusy || !companyId} />
+            <p className="empty-state mt-4">{bankImportStatus}</p>
+          </div>
+        </section>
+
+        <section className="glass-panel p-5">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-white">Ledger Scrutiny Dashboard</h2>
+              <p className="mt-1 text-sm text-white/60">Flags risky accounting patterns from stored ledgers, vouchers, invoices and bank imports.</p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs font-semibold">
+              <span className="rounded-full border border-red-400/20 bg-red-400/10 px-3 py-1 text-red-200">High {scrutiny?.high_risk_count ?? 0}</span>
+              <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-amber-100">Warnings {scrutiny?.warning_count ?? 0}</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/70">Total {scrutiny?.issue_count ?? 0}</span>
+            </div>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {scrutiny?.issues.length ? scrutiny.issues.map((issue, index) => (
+              <div key={`${index}-${issue.title}`} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className={issue.severity === "high" ? "text-red-300" : "text-amber-200"} size={18} />
+                  <div>
+                    <p className="font-semibold text-white">{issue.title}</p>
+                    <p className="mt-1 text-sm text-white/60">{issue.detail}</p>
+                    {issue.amount ? <p className="mt-2 text-xs text-white/50">Amount: {formatMoney(issue.amount)}</p> : null}
+                  </div>
+                </div>
+              </div>
+            )) : <p className="empty-state lg:col-span-2">No scrutiny issues detected for current stored data.</p>}
+          </div>
+        </section>
+
+        <p className="empty-state">
+          {status} GST assistance only. GSTR exports are draft CSVs for review, not government filing.
+        </p>
       </SubscriptionGate>
     </PageFrame>
   );
@@ -366,6 +660,76 @@ export function AdminWorkspace() {
       </div>
     </PageFrame>
   );
+}
+
+function MetricCard({ title, value, copy }: Readonly<{ title: string; value: string; copy: string }>) {
+  return (
+    <article className="glass-card float-card p-5">
+      <p className="text-sm text-white/50">{title}</p>
+      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-2 text-xs leading-5 text-white/50">{copy}</p>
+    </article>
+  );
+}
+
+function StatementCard({ title, rows }: Readonly<{ title: string; rows: Array<[string, string]> }>) {
+  return (
+    <article className="glass-card float-card p-5">
+      <h2 className="text-base font-semibold text-white">{title}</h2>
+      <div className="mt-4 space-y-3">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-3 rounded-xl border border-[#1F2937] bg-[#111827]/80 px-3 py-2 text-sm">
+            <span className="text-white/60">{label}</span>
+            <span className="font-semibold text-white">{value}</span>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function CalculatorBox({
+  title,
+  fields,
+  onRun
+}: Readonly<{
+  title: string;
+  fields: Array<[string, string, (value: string) => void]>;
+  onRun: () => Promise<void>;
+}>) {
+  const [isRunning, setIsRunning] = useState(false);
+  return (
+    <div className="rounded-2xl border border-[#1F2937] bg-[#111827]/80 p-4">
+      <h3 className="font-semibold text-white">{title}</h3>
+      <div className="mt-3 grid gap-2">
+        {fields.map(([label, value, onChange]) => (
+          <label key={label} className="space-y-1 text-xs font-semibold text-white/60">
+            <span>{label}</span>
+            <Input value={value} inputMode="decimal" onChange={(event) => onChange(event.target.value)} />
+          </label>
+        ))}
+      </div>
+      <Button
+        className="mt-3 w-full"
+        type="button"
+        disabled={isRunning}
+        onClick={async () => {
+          setIsRunning(true);
+          try {
+            await onRun();
+          } finally {
+            setIsRunning(false);
+          }
+        }}
+      >
+        {isRunning ? "Calculating..." : `Run ${title}`}
+      </Button>
+    </div>
+  );
+}
+
+function formatMoney(value: string | number | null | undefined) {
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(Number(value ?? 0));
 }
 
 function PageFrame({

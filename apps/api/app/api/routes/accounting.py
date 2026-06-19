@@ -1,4 +1,6 @@
+import csv
 from decimal import Decimal
+from io import StringIO
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -8,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import AuthenticatedUser, require_user
 from app.domain.accounting.engine import AccountingValidationError, money
-from app.models.accounting import AccountNature, Invoice, LedgerCategory
+from app.models.accounting import AccountNature, Invoice, InvoiceType, LedgerCategory
 from app.repositories.accounting import AccountingRepository
 from app.schemas.accounting import (
     AccessRequestCreate,
@@ -23,6 +25,8 @@ from app.schemas.accounting import (
     DemoCompanyResponse,
     GstRateResponse,
     GstReportResponse,
+    EsicCalculatorRequest,
+    EsicCalculatorResponse,
     InvoiceCreate,
     InvoiceGstSummaryRow,
     InvoiceLineResponse,
@@ -32,7 +36,13 @@ from app.schemas.accounting import (
     LedgerGroupResponse,
     LedgerResponse,
     LedgerUpdate,
+    LedgerScrutinyIssue,
+    LedgerScrutinyResponse,
+    PfCalculatorRequest,
+    PfCalculatorResponse,
     ProfitAndLossResponse,
+    TdsCalculatorRequest,
+    TdsCalculatorResponse,
     TrialBalanceRow,
     VoucherCreate,
     VoucherLineResponse,
@@ -685,6 +695,265 @@ def invoice_wise_gst_report(
             )
         )
     return rows
+
+
+@router.get("/companies/{company_id}/reports/gstr-1.csv")
+@router.get("/companies/{company_id}/reports/gstr1.csv")
+def gstr_1_draft_csv(
+    company_id: UUID,
+    user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    repo = repo_for_company(company_id, user, db)
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "GSTIN/UIN of Recipient",
+            "Receiver Name",
+            "Invoice Number",
+            "Invoice Date",
+            "Invoice Value",
+            "Place Of Supply",
+            "Reverse Charge",
+            "Invoice Type",
+            "Rate",
+            "Taxable Value",
+            "CGST",
+            "SGST",
+            "IGST",
+        ]
+    )
+    for invoice in repo.list_invoices(company_id):
+        if invoice.invoice_type != InvoiceType.sales:
+            continue
+        party_name = invoice.party_ledger.name if invoice.party_ledger else "Customer"
+        for line in sorted(invoice.lines, key=lambda item: item.line_number):
+            writer.writerow(
+                [
+                    getattr(invoice.party_ledger, "gstin", None) or "",
+                    party_name,
+                    invoice.invoice_number,
+                    invoice.invoice_date.isoformat(),
+                    invoice.total_amount,
+                    getattr(invoice.party_ledger, "state_code", None) or "",
+                    "N",
+                    "Regular",
+                    line.gst_rate,
+                    line.taxable_value,
+                    line.cgst_amount,
+                    line.sgst_amount,
+                    line.igst_amount,
+                ]
+            )
+    return csv_response(output.getvalue(), "gstr1-draft.csv")
+
+
+@router.get("/companies/{company_id}/reports/gstr-3b.csv")
+@router.get("/companies/{company_id}/reports/gstr3b.csv")
+def gstr_3b_draft_csv(
+    company_id: UUID,
+    user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    repo = repo_for_company(company_id, user, db)
+    sales_taxable = Decimal("0.00")
+    purchase_taxable = Decimal("0.00")
+    output_cgst = Decimal("0.00")
+    output_sgst = Decimal("0.00")
+    output_igst = Decimal("0.00")
+    input_cgst = Decimal("0.00")
+    input_sgst = Decimal("0.00")
+    input_igst = Decimal("0.00")
+    for invoice in repo.list_invoices(company_id):
+        if invoice.invoice_type == InvoiceType.sales:
+            sales_taxable += money(invoice.taxable_value)
+            output_cgst += money(invoice.cgst_amount)
+            output_sgst += money(invoice.sgst_amount)
+            output_igst += money(invoice.igst_amount)
+        elif invoice.invoice_type == InvoiceType.purchase:
+            purchase_taxable += money(invoice.taxable_value)
+            input_cgst += money(invoice.cgst_amount)
+            input_sgst += money(invoice.sgst_amount)
+            input_igst += money(invoice.igst_amount)
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Section", "Description", "Taxable Value", "CGST", "SGST", "IGST", "Total Tax"])
+    writer.writerow(
+        [
+            "3.1(a)",
+            "Outward taxable supplies",
+            money(sales_taxable),
+            money(output_cgst),
+            money(output_sgst),
+            money(output_igst),
+            money(output_cgst + output_sgst + output_igst),
+        ]
+    )
+    writer.writerow(
+        [
+            "4(A)",
+            "Eligible ITC from inward supplies",
+            money(purchase_taxable),
+            money(input_cgst),
+            money(input_sgst),
+            money(input_igst),
+            money(input_cgst + input_sgst + input_igst),
+        ]
+    )
+    writer.writerow(
+        [
+            "Net",
+            "Draft net GST payable",
+            money(sales_taxable - purchase_taxable),
+            money(output_cgst - input_cgst),
+            money(output_sgst - input_sgst),
+            money(output_igst - input_igst),
+            money((output_cgst + output_sgst + output_igst) - (input_cgst + input_sgst + input_igst)),
+        ]
+    )
+    return csv_response(output.getvalue(), "gstr3b-draft.csv")
+
+
+@router.post("/calculators/tds", response_model=TdsCalculatorResponse)
+def tds_calculator(payload: TdsCalculatorRequest) -> TdsCalculatorResponse:
+    tds_amount = money(payload.amount * payload.rate_percent / Decimal("100"))
+    return TdsCalculatorResponse(
+        taxable_amount=money(payload.amount),
+        rate_percent=payload.rate_percent,
+        tds_amount=tds_amount,
+        net_payable=money(payload.amount - tds_amount),
+    )
+
+
+@router.post("/calculators/pf", response_model=PfCalculatorResponse)
+def pf_calculator(payload: PfCalculatorRequest) -> PfCalculatorResponse:
+    eligible_wage = money(min(payload.monthly_basic_wage, payload.wage_ceiling))
+    employee = money(eligible_wage * payload.employee_rate_percent / Decimal("100"))
+    employer = money(eligible_wage * payload.employer_rate_percent / Decimal("100"))
+    return PfCalculatorResponse(
+        eligible_wage=eligible_wage,
+        employee_contribution=employee,
+        employer_contribution=employer,
+        total_contribution=money(employee + employer),
+    )
+
+
+@router.post("/calculators/esic", response_model=EsicCalculatorResponse)
+def esic_calculator(payload: EsicCalculatorRequest) -> EsicCalculatorResponse:
+    eligible = payload.monthly_gross_wage <= payload.wage_limit
+    eligible_wage = money(payload.monthly_gross_wage if eligible else Decimal("0.00"))
+    employee = money(eligible_wage * payload.employee_rate_percent / Decimal("100"))
+    employer = money(eligible_wage * payload.employer_rate_percent / Decimal("100"))
+    return EsicCalculatorResponse(
+        eligible=eligible,
+        eligible_wage=eligible_wage,
+        employee_contribution=employee,
+        employer_contribution=employer,
+        total_contribution=money(employee + employer),
+    )
+
+
+@router.get("/companies/{company_id}/reports/ledger-scrutiny", response_model=LedgerScrutinyResponse)
+def ledger_scrutiny(
+    company_id: UUID,
+    user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> LedgerScrutinyResponse:
+    repo = repo_for_company(company_id, user, db)
+    issues: list[LedgerScrutinyIssue] = []
+    for voucher in repo.list_vouchers(company_id):
+        debit = money(sum((line.debit for line in voucher.entries), Decimal("0.00")))
+        credit = money(sum((line.credit for line in voucher.entries), Decimal("0.00")))
+        if debit != credit:
+            issues.append(
+                LedgerScrutinyIssue(
+                    severity="high",
+                    title="Unbalanced voucher",
+                    detail=f"{voucher.voucher_number} has debit {debit} and credit {credit}.",
+                    amount=money(abs(debit - credit)),
+                )
+            )
+        if len(voucher.entries) < 2:
+            issues.append(
+                LedgerScrutinyIssue(
+                    severity="high",
+                    title="Voucher has fewer than two lines",
+                    detail=f"{voucher.voucher_number} needs complete double-entry lines.",
+                    amount=None,
+                )
+            )
+    seen_invoices: dict[tuple[str, str, Decimal], str] = {}
+    for invoice in repo.list_invoices(company_id):
+        party_name = invoice.party_ledger.name if invoice.party_ledger else "Party"
+        duplicate_key = (invoice.invoice_number.strip().lower(), party_name.lower(), money(invoice.total_amount))
+        if duplicate_key in seen_invoices:
+            issues.append(
+                LedgerScrutinyIssue(
+                    severity="warning",
+                    title="Possible duplicate invoice",
+                    detail=f"{invoice.invoice_number} matches {seen_invoices[duplicate_key]} for {party_name}.",
+                    amount=money(invoice.total_amount),
+                )
+            )
+        else:
+            seen_invoices[duplicate_key] = invoice.invoice_number
+        if money(invoice.cgst_amount + invoice.sgst_amount + invoice.igst_amount) == 0 and money(invoice.taxable_value) > 0:
+            issues.append(
+                LedgerScrutinyIssue(
+                    severity="warning",
+                    title="Invoice has no GST amount",
+                    detail=f"{invoice.invoice_number} has taxable value but no GST. Verify exemption or GST rate.",
+                    amount=money(invoice.taxable_value),
+                )
+            )
+    for ledger, debit, credit in repo.ledger_balances(company_id):
+        balance = money(debit - credit)
+        if ledger.category in {LedgerCategory.cash, LedgerCategory.bank} and balance < 0:
+            issues.append(
+                LedgerScrutinyIssue(
+                    severity="high",
+                    title="Negative cash or bank balance",
+                    detail=f"{ledger.name} shows negative balance.",
+                    amount=abs(balance),
+                )
+            )
+        if debit == 0 and credit == 0 and not ledger.is_system:
+            issues.append(
+                LedgerScrutinyIssue(
+                    severity="info",
+                    title="Ledger has no activity",
+                    detail=f"{ledger.name} has no debit or credit movement.",
+                    amount=None,
+                )
+            )
+    unreconciled = [
+        item for item in repo.list_bank_transactions(company_id)
+        if item.reconciliation_status.value in {"unmatched", "suggested_match"}
+    ]
+    if unreconciled:
+        issues.append(
+            LedgerScrutinyIssue(
+                severity="warning",
+                title="Unreconciled bank transactions",
+                detail=f"{len(unreconciled)} bank transactions still need reconciliation.",
+                amount=money(sum((item.debit if item.debit > 0 else item.credit for item in unreconciled), Decimal("0.00"))),
+            )
+        )
+    return LedgerScrutinyResponse(
+        issue_count=len(issues),
+        high_risk_count=sum(1 for issue in issues if issue.severity == "high"),
+        warning_count=sum(1 for issue in issues if issue.severity == "warning"),
+        issues=issues,
+    )
+
+
+def csv_response(content: str, filename: str) -> Response:
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def make_simple_pdf(text: str) -> bytes:

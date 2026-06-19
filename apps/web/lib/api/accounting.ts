@@ -178,6 +178,42 @@ export type GstReport = {
   net_payable: string;
 };
 
+export type LedgerScrutinyIssue = {
+  severity: "high" | "warning" | "info" | string;
+  title: string;
+  detail: string;
+  amount: string | null;
+};
+
+export type LedgerScrutiny = {
+  issue_count: number;
+  high_risk_count: number;
+  warning_count: number;
+  issues: LedgerScrutinyIssue[];
+};
+
+export type TdsCalculatorResult = {
+  taxable_amount: string;
+  rate_percent: string;
+  tds_amount: string;
+  net_payable: string;
+};
+
+export type PfCalculatorResult = {
+  eligible_wage: string;
+  employee_contribution: string;
+  employer_contribution: string;
+  total_contribution: string;
+};
+
+export type EsicCalculatorResult = {
+  eligible: boolean;
+  eligible_wage: string;
+  employee_contribution: string;
+  employer_contribution: string;
+  total_contribution: string;
+};
+
 type ApiOptions = {
   token: string;
   method?: "GET" | "POST" | "PATCH" | "DELETE";
@@ -287,6 +323,32 @@ export const accountingApi = {
     api<GstReport>(`/companies/${companyId}/reports/gst`, { token }),
   invoiceGstSummary: (companyId: string, token: string) =>
     api<InvoiceGstSummaryRow[]>(`/companies/${companyId}/reports/gst/invoices`, { token }),
+  ledgerScrutiny: (companyId: string, token: string) =>
+    api<LedgerScrutiny>(`/companies/${companyId}/reports/ledger-scrutiny`, { token }),
+  calculateTds: (token: string, body: { amount: string; rate_percent: string }) =>
+    api<TdsCalculatorResult>("/calculators/tds", { token, method: "POST", body }),
+  calculatePf: (
+    token: string,
+    body: {
+      monthly_basic_wage: string;
+      employee_rate_percent: string;
+      employer_rate_percent: string;
+      wage_ceiling: string;
+    }
+  ) => api<PfCalculatorResult>("/calculators/pf", { token, method: "POST", body }),
+  calculateEsic: (
+    token: string,
+    body: {
+      monthly_gross_wage: string;
+      employee_rate_percent: string;
+      employer_rate_percent: string;
+      wage_limit: string;
+    }
+  ) => api<EsicCalculatorResult>("/calculators/esic", { token, method: "POST", body }),
+  gstr1CsvUrl: (companyId: string) =>
+    `/api/reports/gstr1.csv?company_id=${encodeURIComponent(companyId)}`,
+  gstr3bCsvUrl: (companyId: string) =>
+    `/api/reports/gstr3b.csv?company_id=${encodeURIComponent(companyId)}`,
   invoicePdfUrl: (companyId: string, invoiceId: string) =>
     `${publicEnv.NEXT_PUBLIC_API_URL}/companies/${companyId}/invoices/${invoiceId}/pdf`
 };

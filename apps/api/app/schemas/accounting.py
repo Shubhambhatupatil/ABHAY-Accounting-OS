@@ -272,3 +272,58 @@ class InvoiceGstSummaryRow(BaseModel):
     sgst_amount: Decimal
     igst_amount: Decimal
     total_amount: Decimal
+
+
+class TdsCalculatorRequest(BaseModel):
+    amount: Decimal = Field(ge=0)
+    rate_percent: Decimal = Field(default=Decimal("10.00"), ge=0)
+
+
+class TdsCalculatorResponse(BaseModel):
+    taxable_amount: Decimal
+    rate_percent: Decimal
+    tds_amount: Decimal
+    net_payable: Decimal
+
+
+class PfCalculatorRequest(BaseModel):
+    monthly_basic_wage: Decimal = Field(ge=0)
+    employee_rate_percent: Decimal = Field(default=Decimal("12.00"), ge=0)
+    employer_rate_percent: Decimal = Field(default=Decimal("12.00"), ge=0)
+    wage_ceiling: Decimal = Field(default=Decimal("15000.00"), ge=0)
+
+
+class PfCalculatorResponse(BaseModel):
+    eligible_wage: Decimal
+    employee_contribution: Decimal
+    employer_contribution: Decimal
+    total_contribution: Decimal
+
+
+class EsicCalculatorRequest(BaseModel):
+    monthly_gross_wage: Decimal = Field(ge=0)
+    employee_rate_percent: Decimal = Field(default=Decimal("0.75"), ge=0)
+    employer_rate_percent: Decimal = Field(default=Decimal("3.25"), ge=0)
+    wage_limit: Decimal = Field(default=Decimal("21000.00"), ge=0)
+
+
+class EsicCalculatorResponse(BaseModel):
+    eligible: bool
+    eligible_wage: Decimal
+    employee_contribution: Decimal
+    employer_contribution: Decimal
+    total_contribution: Decimal
+
+
+class LedgerScrutinyIssue(BaseModel):
+    severity: str
+    title: str
+    detail: str
+    amount: Decimal | None = None
+
+
+class LedgerScrutinyResponse(BaseModel):
+    issue_count: int
+    high_risk_count: int
+    warning_count: int
+    issues: list[LedgerScrutinyIssue]

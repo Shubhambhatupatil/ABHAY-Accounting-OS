@@ -35,9 +35,8 @@ import {
   Voucher,
   VoucherType
 } from "@/lib/api/accounting";
-import { getAccessToken, isAlphaDemoModeEnabled, isLocalDevelopmentApi, tokenSourceFor } from "@/lib/auth/demo-auth";
+import { getAccessToken } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
-import { publicEnv } from "@/lib/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -133,10 +132,7 @@ export function AccountingWorkspace() {
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   const [requestCompanyId, setRequestCompanyId] = useState("");
   const [requestRole, setRequestRole] = useState<"accountant" | "viewer">("accountant");
-  const [tokenSource, setTokenSource] = useState<"supabase" | "demo" | "missing">("missing");
-  const [backendConnected, setBackendConnected] = useState(false);
   const [companyIdCopied, setCompanyIdCopied] = useState(false);
-  const showAlphaDebug = isAlphaDemoModeEnabled() || isLocalDevelopmentApi();
 
   useEffect(() => {
     const savedFinancialYear = window.localStorage.getItem(FINANCIAL_YEAR_KEY);
@@ -170,30 +166,8 @@ export function AccountingWorkspace() {
   }, [companyId, inventoryItems]);
 
   useEffect(() => {
-    let active = true;
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 3000);
-
-    fetch(`${publicEnv.NEXT_PUBLIC_API_URL}/health`, { cache: "no-store", signal: controller.signal })
-      .then((response) => {
-        if (active) setBackendConnected(response.ok);
-      })
-      .catch(() => {
-        if (active) setBackendConnected(false);
-      })
-      .finally(() => window.clearTimeout(timeoutId));
-
-    return () => {
-      active = false;
-      window.clearTimeout(timeoutId);
-      controller.abort();
-    };
-  }, []);
-
-  useEffect(() => {
     getAccessToken(supabase).then((accessToken) => {
       setToken(accessToken);
-      setTokenSource(tokenSourceFor(accessToken));
       if (!accessToken) {
         setStatus("Please login or continue in Alpha Demo Mode.");
         return;
@@ -368,12 +342,6 @@ export function AccountingWorkspace() {
               <span className="ai-badge mb-2 border-white/20 bg-white/10 text-white">AI Accounting Alpha</span>
               <h1 className="text-2xl font-semibold sm:text-3xl">ABHAY Accounting OS by ANVRITAI</h1>
               <p className="mt-1 text-sm text-white/80">Ledger, vouchers, GST, invoices, and live AI reports</p>
-              {showAlphaDebug ? (
-                <p className="mt-3 rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/75">
-                  API URL: {publicEnv.NEXT_PUBLIC_API_URL} | token source: {tokenSource} | backend status:{" "}
-                  {backendConnected ? "connected" : "offline"}
-                </p>
-              ) : null}
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -384,7 +352,7 @@ export function AccountingWorkspace() {
               setCustomFinancialYear={setCustomFinancialYear}
             />
             <select
-              className="premium-select text-slate-900"
+              className="premium-select"
               value={companyId}
               onChange={(event) => setCompanyId(event.target.value)}
             >
@@ -538,7 +506,7 @@ function FinancialYearSelector(props: {
   return (
     <div className="flex flex-col gap-2 sm:flex-row">
       <select
-        className="premium-select text-slate-900"
+        className="premium-select"
         value={props.selectedFinancialYear}
         onChange={(event) => props.setSelectedFinancialYear(event.target.value)}
         title="Financial year"
@@ -551,7 +519,7 @@ function FinancialYearSelector(props: {
       </select>
       {props.selectedFinancialYear === "Custom FY" ? (
         <Input
-          className="bg-white text-slate-900"
+          className="bg-[#0F172A] text-[#F8FAFC]"
           value={props.customFinancialYear}
           onChange={(event) => props.setCustomFinancialYear(event.target.value)}
           placeholder="Custom FY"
@@ -599,7 +567,7 @@ function DashboardPanel({
         <div key={String(label)} className="glass-card float-card p-4">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">{label}</p>
-            <span className="rounded-xl bg-orange-50 p-2 text-primary"><Icon size={18} aria-hidden="true" /></span>
+            <span className="rounded-xl bg-[#00E5FF]/10 p-2 text-[#00E5FF]"><Icon size={18} aria-hidden="true" /></span>
           </div>
           <p className="mt-3 text-2xl font-semibold">{formatMoney(value)}</p>
         </div>
@@ -607,7 +575,7 @@ function DashboardPanel({
       <div className="glass-card float-card p-4">
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">Inventory Alpha Items</p>
-          <span className="rounded-xl bg-orange-50 p-2 text-primary"><Package size={18} aria-hidden="true" /></span>
+          <span className="rounded-xl bg-[#14B8A6]/10 p-2 text-[#14B8A6]"><Package size={18} aria-hidden="true" /></span>
         </div>
         <p className="mt-3 text-2xl font-semibold">{inventorySummary.items}</p>
         <p className="mt-1 text-xs text-muted-foreground">Closing stock {inventorySummary.closingStock}</p>
@@ -615,7 +583,7 @@ function DashboardPanel({
       <div className="glass-card float-card p-4">
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">Stock Value Alpha</p>
-          <span className="rounded-xl bg-orange-50 p-2 text-primary"><CalendarDays size={18} aria-hidden="true" /></span>
+          <span className="rounded-xl bg-[#FFD700]/10 p-2 text-[#FFD700]"><CalendarDays size={18} aria-hidden="true" /></span>
         </div>
         <p className="mt-3 text-2xl font-semibold">{formatMoney(inventorySummary.stockValue)}</p>
         <p className="mt-1 text-xs text-muted-foreground">Basic local Alpha valuation</p>
@@ -817,10 +785,10 @@ function VouchersPanel({
         </div>
         <div className="max-h-[360px] space-y-2 overflow-auto pr-1">
           {vouchers.length ? vouchers.map((voucher) => (
-            <div key={voucher.id} className="rounded-xl border border-white/70 bg-white/70 p-3 text-sm shadow-sm">
+            <div key={voucher.id} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 text-sm shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-semibold">{voucher.voucher_number}</p>
-                <span className="rounded-full bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">{title(voucher.voucher_type)}</span>
+                <span className="inline-flex h-7 items-center rounded-full border border-[#FF6B00]/25 bg-[#FF6B00]/10 px-2 text-xs font-semibold leading-none text-[#FDBA74]">{title(voucher.voucher_type)}</span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">{voucher.voucher_date} · {voucher.status}</p>
             </div>
@@ -882,7 +850,7 @@ function InvoicesPanel(props: {
           </select>
         </div>
         <Input className="mt-3" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Taxable amount" required />
-        <div className="mt-3 rounded-2xl border border-orange-100 bg-orange-50/70 p-3 text-sm text-orange-900">
+        <div className="mt-3 rounded-2xl border border-[#FF6B00]/25 bg-[#FF6B00]/10 p-3 text-sm text-[#FDBA74]">
           <p className="font-semibold">GST Split Preview</p>
           <p className="mt-1">CGST {formatMoney(cgstAmount)} · SGST {formatMoney(sgstAmount)} · IGST {formatMoney(igstAmount)}</p>
         </div>
@@ -892,7 +860,7 @@ function InvoicesPanel(props: {
         <h2 className="mb-3 text-base font-semibold">Invoices</h2>
         <div className="space-y-2">
           {props.invoices.map((invoice) => (
-            <div key={invoice.id} className="flex items-center justify-between rounded-xl border border-white/70 bg-white/70 p-3 shadow-sm">
+            <div key={invoice.id} className="flex items-center justify-between rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 shadow-sm">
               <div>
                 <p className="font-medium">{invoice.invoice_number}</p>
                 <p className="text-sm text-muted-foreground">{formatMoney(invoice.total_amount)}</p>
@@ -940,7 +908,7 @@ function GstPanel({ gstReport }: { gstReport: GstReport | null }) {
         <h2 className="mb-3 text-base font-semibold">GST category/rate structure</h2>
         <div className="flex flex-wrap gap-2">
           {gstRates.map((rate) => (
-            <span key={rate} className="rounded-full border border-orange-100 bg-orange-50 px-3 py-1 text-sm font-semibold text-orange-700">
+            <span key={rate} className="inline-flex h-8 items-center rounded-full border border-[#FF6B00]/25 bg-[#FF6B00]/10 px-3 text-sm font-semibold leading-none text-[#FDBA74]">
               GST {rate}
             </span>
           ))}
@@ -953,7 +921,7 @@ function GstPanel({ gstReport }: { gstReport: GstReport | null }) {
         <h2 className="mb-3 text-base font-semibold">GST State Codes</h2>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {gstStates.map(([code, name]) => (
-            <span key={code} className="rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm shadow-sm">
+            <span key={code} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 px-3 py-2 text-sm shadow-sm">
               {code} {name}
             </span>
           ))}
@@ -989,7 +957,7 @@ function AccessRequestsPanel(props: {
     <section className="glass-card p-4">
       <h2 className="text-base font-semibold">Access Requests</h2>
       <p className="mt-1 text-sm text-muted-foreground">Request access using Company ID. Owner can approve/reject.</p>
-      <div className="mt-4 rounded-2xl border border-white/70 bg-white/70 p-3">
+      <div className="mt-4 rounded-2xl border border-[#1F2937] bg-[#111827]/80 p-3">
         <p className="text-xs text-muted-foreground">Selected company</p>
         <p className="mt-1 font-semibold">{props.currentCompanyName}</p>
         <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1018,7 +986,7 @@ function AccessRequestsPanel(props: {
       </form>
       <div className="mt-4 space-y-2">
         {props.accessRequests.length ? props.accessRequests.map((request) => (
-          <div key={request.id} className="rounded-xl border border-white/70 bg-white/70 p-3 text-sm">
+          <div key={request.id} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 text-sm">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <p className="font-medium">{request.requester_email ?? request.requester_profile_id}</p>
@@ -1158,7 +1126,7 @@ function ActivityPanel({ auditEvents }: { auditEvents: AuditEvent[] }) {
     <section className="glass-card p-4">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
-          <span className="rounded-xl bg-orange-50 p-2 text-primary"><Activity size={18} /></span>
+          <span className="rounded-xl bg-[#00E5FF]/10 p-2 text-[#00E5FF]"><Activity size={18} /></span>
           <div>
             <h2 className="text-base font-semibold">Recent Activity</h2>
             <p className="text-sm text-muted-foreground">Audit Trail Alpha: who changed what, action type, entity and timestamp.</p>
@@ -1168,7 +1136,7 @@ function ActivityPanel({ auditEvents }: { auditEvents: AuditEvent[] }) {
       </div>
       <div className="space-y-2">
         {auditEvents.length ? auditEvents.map((event) => (
-          <div key={event.id} className="rounded-2xl border border-white/70 bg-white/70 p-3 text-sm shadow-sm">
+          <div key={event.id} className="rounded-2xl border border-[#1F2937] bg-[#111827]/80 p-3 text-sm shadow-sm">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <p className="font-semibold">{title(event.action_type)}</p>
@@ -1187,7 +1155,7 @@ function ActivityPanel({ auditEvents }: { auditEvents: AuditEvent[] }) {
 
 function MiniStat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-2xl border border-white/70 bg-white/70 p-3 shadow-sm">
+    <div className="rounded-2xl border border-[#1F2937] bg-[#111827]/80 p-3 shadow-sm">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-lg font-semibold">{value}</p>
     </div>

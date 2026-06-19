@@ -9,6 +9,12 @@ import AutomationCenterPage from "@/app/(app)/automation-center/page";
 import CommandCenterPage from "@/app/(app)/command-center/page";
 import ImportDataPage from "@/app/(app)/import-data/page";
 import SubscriptionPage from "@/app/(app)/subscription/page";
+import UploadInvoicePage from "@/app/(app)/upload-invoice/page";
+import EntriesPage from "@/app/(app)/entries/page";
+import ReportsPage from "@/app/(app)/reports/page";
+import SettingsPage from "@/app/(app)/settings/page";
+import AdminPage from "@/app/(app)/admin/page";
+import LandingPage from "@/app/page";
 import { LAST_COMPANY_KEY } from "@/components/accounting/accounting-workspace";
 import { AUTH_ACTION_LABELS, AuthCard, SIGNUP_FIELD_LABELS } from "@/components/auth/auth-card";
 import { ALPHA_DEMO_MODE_STORAGE_KEY, LOCAL_DEMO_STORAGE_KEY, LOCAL_DEMO_TOKEN } from "@/lib/auth/demo-auth";
@@ -24,7 +30,13 @@ const pages = [
   AutomationCenterPage,
   CommandCenterPage,
   ImportDataPage,
-  SubscriptionPage
+  SubscriptionPage,
+  UploadInvoicePage,
+  EntriesPage,
+  ReportsPage,
+  SettingsPage,
+  AdminPage,
+  LandingPage
 ];
 
 pages.forEach((Page) => {

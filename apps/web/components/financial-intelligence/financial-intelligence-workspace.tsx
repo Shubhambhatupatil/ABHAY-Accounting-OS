@@ -89,10 +89,10 @@ export function FinancialIntelligenceWorkspace() {
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <select className="premium-select text-slate-900" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
+            <select className="premium-select" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
               {companies.map((company) => <option key={company.id} value={company.id}>{company.legal_name}</option>)}
             </select>
-            <Link className="premium-link text-slate-900" href="/dashboard">Accounting</Link>
+            <Link className="premium-link" href="/dashboard">Accounting</Link>
           </div>
           </div>
         </header>
@@ -158,7 +158,7 @@ function Kpi({ title, value, icon, plain = false }: { title: string; value: stri
     <div className="glass-card float-card p-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{title}</p>
-        <span className="rounded-xl bg-orange-50 p-2 text-primary"><Icon size={18} /></span>
+        <span className="rounded-xl bg-[#00E5FF]/10 p-2 text-[#00E5FF]"><Icon size={18} /></span>
       </div>
       <p className="mt-3 text-2xl font-semibold">{plain ? value : formatMoney(value)}</p>
     </div>
@@ -178,7 +178,7 @@ function TrendCard({ title, value, detail, warning = false }: { title: string; v
 function InsightCard({ insight }: { insight: Insight }) {
   const warning = insight.severity === "warning";
   return (
-    <div className={cn("rounded-xl border border-white/70 p-3 shadow-sm", warning ? "border-destructive/40 bg-destructive/10" : "bg-white/70")}>
+    <div className={cn("rounded-xl border border-[#1F2937] p-3 shadow-sm", warning ? "border-[#FF6B00]/40 bg-[#FF6B00]/10" : "bg-[#111827]/80")}>
       <div className="flex items-center gap-2">
         {warning ? <AlertTriangle size={17} className="text-destructive" /> : <TrendingUp size={17} className="text-primary" />}
         <p className="font-medium">{insight.title}</p>

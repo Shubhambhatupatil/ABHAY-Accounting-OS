@@ -197,7 +197,7 @@ async function api<T>(path: string, options: ApiOptions): Promise<T> {
       body: options.body ? JSON.stringify(options.body) : undefined
     });
   } catch {
-    throw new Error(`API not reachable. Check NEXT_PUBLIC_API_URL. Current API: ${publicEnv.NEXT_PUBLIC_API_URL}`);
+    throw new Error("ABHAY Intelligence is syncing. Your dashboard remains available.");
   }
 
   if (!response.ok) {

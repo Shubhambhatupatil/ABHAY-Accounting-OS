@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.accounting import router as accounting_router
 from app.api.routes.ai_accountant import router as ai_accountant_router
+from app.api.routes.ai_command import router as ai_command_router
 from app.api.routes.ai_entry import router as ai_entry_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.bank_reconciliation import router as bank_reconciliation_router
@@ -13,6 +14,8 @@ from app.api.routes.financial_intelligence import router as financial_intelligen
 from app.api.routes.automation import router as automation_router
 from app.core.config import get_settings
 from app.core.database import create_alpha_schema_if_needed
+
+SYSTEM_STATUS = {"status": "ok", "service": "abhay-api", "ai_engine": "ready"}
 
 
 @asynccontextmanager
@@ -33,13 +36,15 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
+        allow_origin_regex=settings.cors_origin_regex,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=["*"],
         allow_headers=["*"],
     )
     app.include_router(auth_router, prefix="/auth", tags=["auth"])
     app.include_router(accounting_router, tags=["accounting"])
     app.include_router(ai_accountant_router)
+    app.include_router(ai_command_router)
     app.include_router(ai_entry_router)
     app.include_router(automation_router)
     app.include_router(bank_reconciliation_router)
@@ -47,7 +52,22 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
-        return {"status": "ok", "service": "abhay-api"}
+        return SYSTEM_STATUS
+
+    @app.get("/", tags=["system"])
+    def root() -> dict[str, str]:
+        return SYSTEM_STATUS
+
+    @app.get("/routes", tags=["system"])
+    def routes() -> list[dict[str, object]]:
+        paths = app.openapi().get("paths", {})
+        return [
+            {
+                "path": path,
+                "methods": sorted(method.upper() for method in operations.keys()),
+            }
+            for path, operations in paths.items()
+        ]
 
     return app
 

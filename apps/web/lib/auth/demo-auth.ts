@@ -5,6 +5,7 @@ import { publicEnv } from "@/lib/config";
 export const LOCAL_DEMO_TOKEN = "abhay-local-demo-token";
 export const LOCAL_DEMO_STORAGE_KEY = "abhay_demo_token";
 export const ALPHA_DEMO_MODE_STORAGE_KEY = "abhay_alpha_demo";
+export const ALPHA_DEMO_MODE_COOKIE = "abhay_alpha_demo";
 
 const LEGACY_LOCAL_DEMO_STORAGE_KEY = "abhay.localDemoToken";
 const LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY = "abhay.alphaDemoMode";
@@ -52,6 +53,7 @@ export function isAlphaDemoFallbackAllowed() {
 export function startLocalDemoSession() {
   window.localStorage.setItem(ALPHA_DEMO_MODE_STORAGE_KEY, "true");
   window.localStorage.setItem(LOCAL_DEMO_STORAGE_KEY, LOCAL_DEMO_TOKEN);
+  document.cookie = `${ALPHA_DEMO_MODE_COOKIE}=true; path=/; max-age=1209600; samesite=lax`;
   window.localStorage.removeItem(LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY);
   window.localStorage.removeItem(LEGACY_LOCAL_DEMO_STORAGE_KEY);
   return LOCAL_DEMO_TOKEN;
@@ -81,6 +83,7 @@ export function clearLocalDemoSession() {
   window.localStorage.removeItem(LOCAL_DEMO_STORAGE_KEY);
   window.localStorage.removeItem(LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY);
   window.localStorage.removeItem(LEGACY_LOCAL_DEMO_STORAGE_KEY);
+  document.cookie = `${ALPHA_DEMO_MODE_COOKIE}=; path=/; max-age=0; samesite=lax`;
 }
 
 export function tokenSourceFor(token: string | null | undefined): "supabase" | "demo" | "missing" {

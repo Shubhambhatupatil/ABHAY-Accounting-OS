@@ -20,3 +20,6 @@ work/
 .env
 .env.local
 .env.*.local
+
+.vercel
+.env*

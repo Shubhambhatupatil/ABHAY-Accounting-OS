@@ -15,11 +15,13 @@ class Settings(BaseSettings):
     database_url: str = Field(min_length=1)
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
+        "https://abhay-accounting-os-new-shubhambhatupatil-5720s-projects.vercel.app",
         "https://abhay-accounting-os-new.vercel.app",
         "https://abhay.anvritai.com",
         "https://anvritai.com",
         "https://www.anvritai.com",
     ]
+    cors_origin_regex: str = r"https://.*\.vercel\.app"
     openai_api_key: str | None = None
     alpha_demo_mode: bool = False
 

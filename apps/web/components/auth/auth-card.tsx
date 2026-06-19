@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { verifyApiSession } from "@/lib/api/auth";
 import { isAlphaDemoModeEnabled, startLocalDemoSession } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
+import { getAuthCallbackUrl } from "@/lib/config";
 
 type AuthMode = "login" | "signup";
 const AUTH_NOTICE_KEY = "abhay_auth_notice";
@@ -54,6 +55,7 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
           email: normalizedEmail,
           password,
           options: {
+            emailRedirectTo: getAuthCallbackUrl(),
             data: {
               full_name: fullName.trim(),
               initial_company_name: businessName.trim() || undefined
@@ -68,12 +70,12 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
         }
         const accessToken = result.data.session?.access_token;
         if (!accessToken) {
-          setSuccess("Account created. Please confirm your email, or continue in Alpha Demo Mode for now.");
+          setSuccess("Check your email to confirm your ABHAY account.");
           return;
         }
-        await verifyApiSession(accessToken);
-        setSuccess("Account created. Opening dashboard...");
-        router.push("/dashboard");
+        await verifyBackendSessionIfAvailable(accessToken);
+        setSuccess("Account created. Opening company onboarding...");
+        router.push("/settings");
         router.refresh();
         return;
       }
@@ -84,14 +86,16 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
       }
       const accessToken = result.data.session?.access_token;
       if (accessToken) {
-        await verifyApiSession(accessToken);
-        setSuccess("Login successful. Opening dashboard...");
-        router.push("/dashboard");
+        await verifyBackendSessionIfAvailable(accessToken);
+        const redirectPath = await getPostLoginPath();
+        setSuccess(redirectPath === "/dashboard" ? "Login successful. Opening dashboard..." : "Login successful. Opening company setup...");
+        router.push(redirectPath);
         router.refresh();
         return;
       }
       throw new Error("email not confirmed");
     } catch (caught) {
+      console.error("ABHAY auth error", caught);
       setError(formatAuthError(caught, mode));
     } finally {
       setIsSubmitting(false);
@@ -123,14 +127,42 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
       const normalizedEmail = email.trim().toLowerCase();
       validateEmail(normalizedEmail);
       const result = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-        redirectTo: typeof window === "undefined" ? undefined : `${window.location.origin}/login`
+        redirectTo: getAuthCallbackUrl()
       });
       if (result.error) {
         throw result.error;
       }
       setSuccess("Password reset email sent if this email is registered.");
     } catch (caught) {
+      console.error("ABHAY password reset error", caught);
       setError(formatPasswordResetError(caught));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function resendConfirmationEmail() {
+    if (isSubmitting) return;
+    setError(null);
+    setSuccess(null);
+    setIsSubmitting(true);
+    try {
+      const normalizedEmail = email.trim().toLowerCase();
+      validateEmail(normalizedEmail);
+      const result = await supabase.auth.resend({
+        type: "signup",
+        email: normalizedEmail,
+        options: {
+          emailRedirectTo: getAuthCallbackUrl()
+        }
+      });
+      if (result.error) {
+        throw result.error;
+      }
+      setSuccess("Confirmation email sent. Please check your inbox.");
+    } catch (caught) {
+      console.error("ABHAY confirmation resend error", caught);
+      setError(formatResendConfirmationError(caught));
     } finally {
       setIsSubmitting(false);
     }
@@ -189,15 +221,15 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
           </label>
         ) : null}
       </div>
-      {error ? <p className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{success}</p> : null}
+      {error ? <p className="mt-4 rounded-xl border border-destructive/40 bg-destructive/15 p-3 text-sm text-red-200">{error}</p> : null}
+      {success ? <p className="mt-4 rounded-xl border border-emerald-300/30 bg-emerald-400/10 p-3 text-sm text-emerald-200">{success}</p> : null}
       <Button type="submit" className="mt-5 w-full" disabled={isSubmitting}>
         {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : isSignup ? <UserPlus size={18} /> : <LogIn size={18} />}
         {isSignup ? "Create account" : "Login"}
       </Button>
       {!isSignup ? (
         <Link
-          className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-xl border border-white/70 bg-white/75 px-4 text-sm font-semibold text-foreground shadow-sm backdrop-blur transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+          className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.08] px-4 text-sm font-semibold text-white shadow-sm backdrop-blur transition duration-300 hover:-translate-y-0.5 hover:bg-white/[0.12] hover:shadow-md"
           href="/signup"
         >
           Create account
@@ -217,14 +249,24 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
         </p>
       ) : null}
       {!isSignup ? (
-        <button
-          type="button"
-          className="mt-4 w-full text-center text-sm font-medium text-primary"
-          disabled={isSubmitting}
-          onClick={resetPassword}
-        >
-          Forgot password?
-        </button>
+        <div className="mt-4 grid gap-2 text-center text-sm font-medium sm:grid-cols-2">
+          <button
+            type="button"
+            className="text-primary"
+            disabled={isSubmitting}
+            onClick={resetPassword}
+          >
+            Forgot password?
+          </button>
+          <button
+            type="button"
+            className="text-primary"
+            disabled={isSubmitting}
+            onClick={resendConfirmationEmail}
+          >
+            Resend confirmation email
+          </button>
+        </div>
       ) : null}
       <p className="mt-5 text-center text-sm text-muted-foreground">
         {isSignup ? "Already have account?" : "New to ABHAY?"}{" "}
@@ -255,11 +297,48 @@ function validateAuthForm(email: string, password: string, confirmPassword?: str
   }
 }
 
+async function verifyBackendSessionIfAvailable(accessToken: string) {
+  try {
+    await verifyApiSession(accessToken);
+  } catch (error) {
+    console.warn("ABHAY backend verification unavailable", error);
+  }
+}
+
+async function getPostLoginPath() {
+  try {
+    const supabase = createSupabaseBrowserClient();
+    const { data, error } = await supabase
+      .from("company_members")
+      .select("id")
+      .limit(1);
+
+    if (error) {
+      console.warn("ABHAY company membership check unavailable", error);
+      return "/settings";
+    }
+
+    return data?.length ? "/dashboard" : "/settings";
+  } catch (error) {
+    console.warn("ABHAY company membership check unavailable", error);
+    return "/settings";
+  }
+}
+
 function formatAuthError(caught: unknown, mode: AuthMode) {
   const message = caught instanceof Error ? caught.message : "Authentication failed.";
   const normalized = message.toLowerCase();
   if (normalized.includes("rate limit") || normalized.includes("too many") || normalized.includes("email rate limit")) {
     return "Email service is rate limited. Please wait or use Alpha Demo Mode.";
+  }
+  if (
+    normalized.includes("email signup") ||
+    normalized.includes("email provider") ||
+    normalized.includes("provider is disabled") ||
+    normalized.includes("signup disabled") ||
+    normalized.includes("signups not allowed")
+  ) {
+    return "Email signup is not enabled in Supabase.";
   }
   if (normalized.includes("already registered") || normalized.includes("already been registered") || normalized.includes("user already registered")) {
     return "This email may already be registered. Try login or reset password.";
@@ -273,10 +352,14 @@ function formatAuthError(caught: unknown, mode: AuthMode) {
   if (normalized.includes("passwords do not match")) {
     return "Passwords do not match.";
   }
+  if (mode === "login" && normalized.includes("email not confirmed")) {
+    return "Please confirm your email before signing in.";
+  }
+  if (mode === "login" && (normalized.includes("invalid login") || normalized.includes("invalid credentials"))) {
+    return "Email or password is incorrect, or your email is not confirmed yet.";
+  }
   if (normalized.includes("invalid login") || normalized.includes("invalid credentials") || normalized.includes("email not confirmed")) {
-    return mode === "login"
-      ? "Login failed. Check password, email confirmation, or use Alpha Demo Mode."
-      : "Account created. Please confirm your email, or continue in Alpha Demo Mode for now.";
+    return "Account created. Please confirm your email, or continue in Alpha Demo Mode for now.";
   }
   if (normalized.includes("password")) {
     return "Invalid password. Use at least 8 characters.";
@@ -284,6 +367,18 @@ function formatAuthError(caught: unknown, mode: AuthMode) {
   return mode === "login"
     ? "Login failed. Check password, email confirmation, or use Alpha Demo Mode."
     : "Signup failed. Try login if this email already exists, or use Alpha Demo Mode.";
+}
+
+function formatResendConfirmationError(caught: unknown) {
+  const message = caught instanceof Error ? caught.message : "Confirmation email could not be sent.";
+  const normalized = message.toLowerCase();
+  if (normalized.includes("rate limit") || normalized.includes("too many") || normalized.includes("email rate limit")) {
+    return "Email service is rate limited. Please wait or use Alpha Demo Mode.";
+  }
+  if (normalized.includes("invalid email")) {
+    return "Enter a valid email address.";
+  }
+  return "Confirmation email could not be sent. Check the email address or try Alpha Demo Mode.";
 }
 
 function formatPasswordResetError(caught: unknown) {

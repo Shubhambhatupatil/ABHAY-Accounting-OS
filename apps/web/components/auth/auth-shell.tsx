@@ -6,7 +6,7 @@ export function AuthShell({ children, title, subtitle }: Readonly<{
   subtitle: string;
 }>) {
   return (
-    <main className="abhay-shell-bg min-h-screen">
+    <main className="abhay-shell-bg min-h-screen text-white">
       <section className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 gap-5 p-4 lg:grid-cols-[1fr_460px] lg:p-8">
         <div className="hero-grid flex min-h-[34vh] flex-col justify-between rounded-3xl p-6 text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] lg:min-h-[calc(100vh-4rem)] lg:p-10">
           <div className="flex items-center gap-3">

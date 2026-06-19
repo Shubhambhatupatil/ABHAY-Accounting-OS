@@ -157,10 +157,10 @@ export function BankReconciliationWorkspace() {
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <select className="premium-select text-slate-900" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
+            <select className="premium-select" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
               {companies.map((company) => <option key={company.id} value={company.id}>{company.legal_name}</option>)}
             </select>
-            <Link className="premium-link text-slate-900" href="/dashboard">Accounting</Link>
+            <Link className="premium-link" href="/dashboard">Accounting</Link>
           </div>
           </div>
         </header>

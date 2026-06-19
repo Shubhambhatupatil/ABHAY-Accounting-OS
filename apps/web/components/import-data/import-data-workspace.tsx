@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { ArrowRightLeft, CheckCircle2, FileSpreadsheet, FileText, ShieldAlert, UploadCloud } from "lucide-react";
@@ -83,11 +83,11 @@ export function ImportDataWorkspace() {
             <div>
               <span className="ai-badge mb-3 border-white/20 bg-white/10 text-white">Import Intelligence</span>
               <h1 className="text-2xl font-semibold sm:text-3xl">Keep Tally. Add ABHAY intelligence.</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/82">
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/80">
                 Tally = accounting records. ABHAY = accounting intelligence, automation and document memory.
               </p>
             </div>
-            <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm leading-6 text-white/82 backdrop-blur">
+            <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm leading-6 text-white/80 backdrop-blur">
               ABHAY does not force you to leave Tally. Import/export data gradually.
             </div>
           </div>
@@ -100,16 +100,16 @@ export function ImportDataWorkspace() {
             return (
               <article key={option.title} className="glass-card float-card flex flex-col p-5">
                 <div className="flex items-start justify-between gap-3">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-50 text-primary">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#FF6B00]/10 text-[#FDBA74]">
                     <Icon size={21} />
                   </span>
                   <StatusBadge label={option.badge} />
                 </div>
-                <h2 className="mt-4 text-base font-semibold text-slate-950">{option.title}</h2>
+                <h2 className="mt-4 text-base font-semibold text-white">{option.title}</h2>
                 <p className="mt-2 min-h-16 text-sm leading-6 text-muted-foreground">{option.description}</p>
-                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{option.status}</p>
+                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#A1A1AA]">{option.status}</p>
                 {enabled ? (
-                  <label className="mt-4 inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-orange-100 bg-white px-4 text-sm font-semibold text-slate-900 shadow-sm transition hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-md">
+                  <label className="mt-4 inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#FF6B00]/25 bg-[#FF6B00]/10 px-4 text-sm font-semibold leading-none text-[#FDBA74] shadow-sm transition hover:-translate-y-0.5 hover:border-[#00E5FF]/30 hover:shadow-md">
                     <UploadCloud size={17} />
                     Select file
                     <input
@@ -147,12 +147,12 @@ export function ImportDataWorkspace() {
 
           <div className="glass-card p-5">
             <h2 className="text-base font-semibold">GST Setup</h2>
-            <label className="mt-4 block text-sm font-semibold text-slate-800" htmlFor="gst-state">
+            <label className="mt-4 block text-sm font-semibold text-white" htmlFor="gst-state">
               GST State Code
             </label>
             <select
               id="gst-state"
-              className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm focus:border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-100"
+              className="premium-select mt-2 w-full"
               value={selectedState}
               onChange={(event) => setSelectedState(event.target.value)}
             >
@@ -164,7 +164,7 @@ export function ImportDataWorkspace() {
             </select>
             <div className="mt-4 flex flex-wrap gap-2">
               {gstRates.map((rate) => (
-                <span key={rate} className="rounded-full border border-orange-100 bg-orange-50 px-3 py-1 text-sm font-semibold text-orange-700">
+                <span key={rate} className="inline-flex h-8 items-center rounded-full border border-[#FF6B00]/25 bg-[#FF6B00]/10 px-3 text-sm font-semibold leading-none text-[#FDBA74]">
                   GST {rate}
                 </span>
               ))}
@@ -181,7 +181,7 @@ export function ImportDataWorkspace() {
                 Import records when ready, keep familiar accounting workflows, and use ABHAY for AI review, GST assistance, document memory, and owner intelligence.
               </p>
             </div>
-            <div className="flex items-center gap-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+            <div className="flex items-center gap-2 rounded-2xl border border-[#14B8A6]/25 bg-[#14B8A6]/10 px-3 py-2 text-sm font-semibold text-[#9FF5EA]">
               <CheckCircle2 size={17} />
               Tally-friendly Alpha
             </div>
@@ -197,10 +197,10 @@ export function ImportDataWorkspace() {
 function StatusBadge({ label }: Readonly<{ label: string }>) {
   const className =
     label === "Ready"
-      ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+      ? "border-[#14B8A6]/25 bg-[#14B8A6]/10 text-[#9FF5EA]"
       : label === "Alpha"
-        ? "border-orange-100 bg-orange-50 text-orange-700"
-        : "border-slate-200 bg-slate-50 text-slate-600";
+        ? "border-[#FF6B00]/25 bg-[#FF6B00]/10 text-[#FDBA74]"
+        : "border-[#1F2937] bg-[#111827] text-[#A1A1AA]";
 
   return <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}>{label}</span>;
 }

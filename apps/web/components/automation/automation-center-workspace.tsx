@@ -114,7 +114,7 @@ export function AutomationCenterWorkspace() {
             {bankTransactions.length === 0 ? <p className="text-sm text-muted-foreground">No unreconciled bank transactions available.</p> : (
               <div className="space-y-2">
                 {bankTransactions.slice(0, 8).map((item) => (
-                  <div key={item.id} className="flex flex-col gap-2 rounded-xl border border-white/70 bg-white/70 p-3 shadow-sm transition hover:-translate-y-0.5 hover:bg-orange-50 sm:flex-row sm:items-center sm:justify-between">
+                  <div key={item.id} className="flex flex-col gap-2 rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-[#00E5FF]/30 sm:flex-row sm:items-center sm:justify-between">
                     <div><p className="font-medium">{item.description}</p><p className="text-sm text-muted-foreground">{item.transaction_date} · {formatMoney(Number(item.debit) || Number(item.credit))}</p></div>
                     <Button type="button" variant="secondary" onClick={() => createBankSuggestion(item.id)} disabled={isBusy}><Bot size={17} /> Suggest voucher</Button>
                   </div>
@@ -130,7 +130,7 @@ export function AutomationCenterWorkspace() {
 }
 
 function Header({ title, subtitle, companies, companyId, setCompanyId }: { title: string; subtitle: string; companies: Company[]; companyId: string; setCompanyId: (id: string) => void }) {
-  return <header className="hero-grid rounded-3xl p-5 text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] lg:p-6"><div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><span className="ai-badge mb-2 border-white/20 bg-white/10 text-white">AI Active</span><h1 className="text-2xl font-semibold sm:text-3xl">{title}</h1><p className="mt-1 text-sm text-white/80">{subtitle}</p></div><select className="premium-select text-slate-900" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>{companies.map((company) => <option key={company.id} value={company.id}>{company.legal_name}</option>)}</select></div></header>;
+  return <header className="hero-grid rounded-3xl p-5 text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] lg:p-6"><div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><span className="ai-badge mb-2 border-white/20 bg-white/10 text-white">AI Active</span><h1 className="text-2xl font-semibold sm:text-3xl">{title}</h1><p className="mt-1 text-sm text-white/80">{subtitle}</p></div><select className="premium-select" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>{companies.map((company) => <option key={company.id} value={company.id}>{company.legal_name}</option>)}</select></div></header>;
 }
 
 function Card({ label, value }: { label: string; value: string }) {
@@ -138,7 +138,7 @@ function Card({ label, value }: { label: string; value: string }) {
 }
 
 function SuggestionPreview({ suggestion }: { suggestion: AiSuggestion }) {
-  return <div className="glass-panel p-4"><h2 className="font-semibold">Latest Suggestion</h2><p className="mt-1 text-sm text-muted-foreground">{suggestion.explanation}</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{suggestion.lines.map((line) => <div key={line.ledger_name} className="rounded-xl border border-white/70 bg-white/70 p-3 text-sm"><p className="font-medium">{line.ledger_name}</p><p>Debit {formatMoney(line.debit)} · Credit {formatMoney(line.credit)}</p></div>)}</div></div>;
+  return <div className="glass-panel p-4"><h2 className="font-semibold">Latest Suggestion</h2><p className="mt-1 text-sm text-muted-foreground">{suggestion.explanation}</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{suggestion.lines.map((line) => <div key={line.ledger_name} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 text-sm"><p className="font-medium">{line.ledger_name}</p><p>Debit {formatMoney(line.debit)} · Credit {formatMoney(line.credit)}</p></div>)}</div></div>;
 }
 
 function formatMoney(value: string | number | undefined) {

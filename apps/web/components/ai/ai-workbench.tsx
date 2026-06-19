@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, CheckCircle2, FileText, Loader2, RefreshCw, Send, Upload, XCircle } from "lucide-react";
 import { accountingApi, Company } from "@/lib/api/accounting";
 import {
@@ -12,9 +12,10 @@ import {
   AiOwnerReport
 } from "@/lib/api/ai-entry";
 import type { ConfirmAiPostingResponse } from "@/lib/api/ai-accountant";
-import { getAccessToken, isAlphaDemoModeEnabled, isLocalDevelopmentApi, tokenSourceFor } from "@/lib/auth/demo-auth";
+import { AiCommandResponse, runAiCommand } from "@/lib/api/ai-command";
+import { AbhayHealthStatus, checkAbhayHealth } from "@/lib/api/health";
+import { getAccessToken } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
-import { publicEnv } from "@/lib/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -26,11 +27,15 @@ const examples = [
   "Paid diesel expense 2500 cash"
 ];
 
+type BackendStatus = "checking" | "online" | "offline";
+
 export function AiWorkbench() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [token, setToken] = useState<string | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState("");
+  const [commandText, setCommandText] = useState("Analyze GST and ledger risks for this month's books");
+  const [commandResult, setCommandResult] = useState<AiCommandResponse | null>(null);
   const [entryText, setEntryText] = useState(examples[0]);
   const [sourceType, setSourceType] = useState("one_line_text");
   const [suggestion, setSuggestion] = useState<AiEntryWorkbenchResponse | null>(null);
@@ -41,10 +46,20 @@ export function AiWorkbench() {
   const [corrections, setCorrections] = useState<AiCorrection[]>([]);
   const [status, setStatus] = useState("Loading AI Workbench");
   const [statusTone, setStatusTone] = useState<"loading" | "success" | "error" | "info">("loading");
-  const [backendConnected, setBackendConnected] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
+  const [healthStatus, setHealthStatus] = useState<AbhayHealthStatus>({
+    backendOnline: false,
+    aiReady: false,
+    message: "Checking ABHAY Intelligence",
+    source: "/api/abhay-health",
+    lastCheck: "checking"
+  });
   const [isBusy, setIsBusy] = useState(false);
-  const [tokenSource, setTokenSource] = useState<"supabase" | "demo" | "missing">("missing");
-  const showAlphaDebug = isAlphaDemoModeEnabled() || isLocalDevelopmentApi();
+  const backendStatusRef = useRef<BackendStatus>("checking");
+
+  useEffect(() => {
+    backendStatusRef.current = backendStatus;
+  }, [backendStatus]);
 
   const loadCompanies = useCallback(async (accessToken: string) => {
     setStatusTone("loading");
@@ -64,18 +79,21 @@ export function AiWorkbench() {
   useEffect(() => {
     let active = true;
 
-    async function checkBackend() {
-      try {
-        const response = await fetch(`${publicEnv.NEXT_PUBLIC_API_URL}/health`, { cache: "no-store" });
-        if (active) setBackendConnected(response.ok);
-      } catch {
-        if (active) setBackendConnected(false);
-      }
+    async function runHealthCheck() {
+      setBackendStatus("checking");
+      const health = await checkAbhayHealth();
+      if (!active) return;
+      setHealthStatus(health);
+      setBackendStatus(health.backendOnline && health.aiReady ? "online" : "offline");
     }
 
-    void checkBackend();
+    void runHealthCheck();
+    const intervalId = window.setInterval(() => {
+      void runHealthCheck();
+    }, 30_000);
     return () => {
       active = false;
+      window.clearInterval(intervalId);
     };
   }, []);
 
@@ -89,7 +107,6 @@ export function AiWorkbench() {
         const accessToken = await getAccessToken(supabase);
         if (!active) return;
         setToken(accessToken);
-        setTokenSource(tokenSourceFor(accessToken));
         if (!accessToken) {
           setCompanies([]);
           setCompanyId("");
@@ -100,7 +117,7 @@ export function AiWorkbench() {
         await loadCompanies(accessToken);
       } catch (error) {
         if (active) {
-          setStatus(error instanceof Error ? error.message : "Unable to load AI Workbench.");
+          setStatus(displayWorkbenchError(error, backendStatusRef.current, "Unable to load AI Workbench."));
           setStatusTone("error");
         }
       }
@@ -127,7 +144,7 @@ export function AiWorkbench() {
       setOwnerReport(ownerReportRow);
     } catch (error) {
       if (reportError) {
-        setStatus(error instanceof Error ? error.message : "Unable to load AI review data.");
+        setStatus(displayWorkbenchError(error, backendStatusRef.current, "Unable to load AI review data."));
         setStatusTone("error");
       }
     }
@@ -156,7 +173,7 @@ export function AiWorkbench() {
       setStatusTone("success");
       await refreshReviewData(companyId, token, false);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "AI parse failed.");
+      setStatus(displayWorkbenchError(error, backendStatusRef.current, "AI parse failed."));
       setStatusTone("error");
     } finally {
       setIsBusy(false);
@@ -192,7 +209,7 @@ export function AiWorkbench() {
       setStatusTone("success");
       await refreshReviewData();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "PDF extraction failed.");
+      setStatus(displayWorkbenchError(error, backendStatusRef.current, "PDF extraction failed."));
       setStatusTone("error");
     } finally {
       setIsBusy(false);
@@ -209,7 +226,7 @@ export function AiWorkbench() {
       setStatusTone("success");
       await refreshReviewData();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Approval failed.");
+      setStatus(displayWorkbenchError(error, backendStatusRef.current, "Approval failed."));
       setStatusTone("error");
     } finally {
       setIsBusy(false);
@@ -226,15 +243,51 @@ export function AiWorkbench() {
       setStatusTone("info");
       await refreshReviewData();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Reject failed.");
+      setStatus(displayWorkbenchError(error, backendStatusRef.current, "Reject failed."));
       setStatusTone("error");
     } finally {
       setIsBusy(false);
     }
   }
 
-  const aiEngineReady = Boolean(token && companyId);
-  const canParse = Boolean(aiEngineReady && entryText.trim());
+  async function analyzeCommand() {
+    const command = commandText.trim();
+    if (!command) {
+      setStatus("Enter an AI command to analyze.");
+      setStatusTone("error");
+      return;
+    }
+    setIsBusy(true);
+    setCommandResult(null);
+    setStatus("ABHAY AI is analyzing your command...");
+    setStatusTone("loading");
+    try {
+      const result = await runAiCommand(command, {
+        companyId,
+        source: "ai-workbench",
+        hasToken: Boolean(token)
+      });
+      setCommandResult(result);
+      setStatus("ABHAY AI command analyzed.");
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "AI command failed.");
+      setStatusTone("error");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function recheckAiEngine() {
+    setBackendStatus("checking");
+    const health = await checkAbhayHealth();
+    setHealthStatus(health);
+    setBackendStatus(health.backendOnline && health.aiReady ? "online" : "offline");
+  }
+
+  const backendConnected = healthStatus.backendOnline;
+  const aiReady = healthStatus.aiReady;
+  const canParse = Boolean(token && companyId && entryText.trim());
   const gstPreview = useMemo(() => suggestion?.suggestion.lines.filter((line) => line.ledger_name.toLowerCase().includes("gst")) ?? [], [suggestion]);
 
   return (
@@ -251,19 +304,21 @@ export function AiWorkbench() {
               <h1 className="text-2xl font-semibold sm:text-3xl">AI Workbench</h1>
               <p className="mt-1 text-sm text-white/80">Command console for input, review, approve, and post</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <ReadinessBadge ready={backendConnected} readyText="Backend connected" pendingText="Backend offline" />
-                <ReadinessBadge ready={aiEngineReady} readyText="AI Engine ready" pendingText="AI Engine waiting" />
+                <ReadinessBadge
+                  ready={backendConnected}
+                  readyText="Backend online"
+                  pendingText={backendStatus === "checking" ? "Checking backend" : "Backend offline"}
+                />
+                <ReadinessBadge
+                  ready={aiReady}
+                  readyText="AI Engine ready"
+                  pendingText={backendStatus === "checking" ? "Checking AI Engine" : "AI Engine offline"}
+                />
               </div>
-              {showAlphaDebug ? (
-                <p className="mt-3 rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/75">
-                  API URL: {publicEnv.NEXT_PUBLIC_API_URL} | token source: {tokenSource} | backend status:{" "}
-                  {backendConnected ? "connected" : "offline"}
-                </p>
-              ) : null}
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <select className="premium-select text-slate-900" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
+            <select className="premium-select" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
               {!companies.length ? <option value="">No company found</option> : null}
               {companies.map((company) => <option key={company.id} value={company.id}>{company.legal_name}</option>)}
             </select>
@@ -271,13 +326,50 @@ export function AiWorkbench() {
               <RefreshCw size={17} />
               Refresh
             </Button>
+            <Button type="button" variant="secondary" onClick={recheckAiEngine} disabled={isBusy}>
+              <RefreshCw size={17} />
+              Recheck AI Engine
+            </Button>
           </div>
           </div>
         </header>
 
         <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-4">
-            <form className="glass-panel p-4 ring-1 ring-orange-100/70" onSubmit={(event) => { event.preventDefault(); void parseText(); }}>
+            <form className="glass-panel p-4 ring-1 ring-[#FFD700]/10" onSubmit={(event) => { event.preventDefault(); void analyzeCommand(); }}>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <span className="ai-badge mb-2">AI Command</span>
+                  <h2 className="text-base font-semibold">Run / Analyze</h2>
+                </div>
+                {commandResult ? (
+                  <span className="inline-flex min-h-7 items-center justify-center rounded-full border border-[#FFD700]/30 bg-[#FFD700]/10 px-3 text-xs font-semibold text-[#FFE88A]">
+                    Confidence {Math.round(commandResult.confidence * 100)}%
+                  </span>
+                ) : null}
+              </div>
+              <div className="grid gap-3 md:grid-cols-[1fr_150px]">
+                <Input value={commandText} onChange={(event) => setCommandText(event.target.value)} required />
+                <Button className="ai-glow" type="submit" disabled={isBusy || !commandText.trim()}>
+                  {isBusy ? <Loader2 className="animate-spin" size={17} /> : <Bot size={17} />}
+                  Analyze
+                </Button>
+              </div>
+              {commandResult ? (
+                <div className="mt-4 rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
+                  <p className="text-sm font-semibold text-[#F8FAFC]">{commandResult.summary}</p>
+                  <div className="mt-3 grid gap-2">
+                    {commandResult.actions.map((action, index) => (
+                      <p key={`${index}-${action}`} className="rounded-lg border border-[#1F2937] bg-[#0F172A] p-2 text-sm text-muted-foreground">
+                        {index + 1}. {action}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </form>
+
+            <form className="glass-panel p-4 ring-1 ring-[#00E5FF]/10" onSubmit={(event) => { event.preventDefault(); void parseText(); }}>
               <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <span className="ai-badge mb-2">AI Active</span>
@@ -300,14 +392,14 @@ export function AiWorkbench() {
                 <p className="text-xs text-muted-foreground">
                   Parse is enabled when token, company, and transaction text are ready.
                 </p>
-                <Button type="button" variant="secondary" onClick={runTestEntry} disabled={isBusy || !aiEngineReady}>
+                <Button type="button" variant="secondary" onClick={runTestEntry} disabled={isBusy || !token || !companyId}>
                   {isBusy ? <Loader2 className="animate-spin" size={17} /> : <Bot size={17} />}
                   Test AI Entry
                 </Button>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {examples.map((example) => (
-                  <button key={example} type="button" className="rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-left text-xs text-muted-foreground shadow-sm transition hover:-translate-y-0.5 hover:bg-orange-50" onClick={() => setEntryText(example)}>
+                  <button key={example} type="button" className="rounded-xl border border-[#1F2937] bg-[#111827]/80 px-3 py-2 text-left text-xs text-muted-foreground shadow-sm transition hover:-translate-y-0.5 hover:border-[#00E5FF]/30 hover:bg-[#0F172A]" onClick={() => setEntryText(example)}>
                     {example}
                   </button>
                 ))}
@@ -319,8 +411,8 @@ export function AiWorkbench() {
               <p className="mb-3 text-sm text-muted-foreground">
                 Alpha supports text PDFs only. Image/scanned OCR is coming soon. Use text PDF or one-line entry for now.
               </p>
-              <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-orange-200 bg-orange-50/40 p-4 text-center text-sm text-muted-foreground transition hover:-translate-y-0.5 hover:bg-orange-50">
-                <Upload className="mb-2 text-primary" size={22} />
+              <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#00E5FF]/25 bg-[#00E5FF]/10 p-4 text-center text-sm text-muted-foreground transition hover:-translate-y-0.5 hover:border-[#FF6B00]/30 hover:bg-[#111827]">
+                <Upload className="mb-2 text-[#00E5FF]" size={22} />
                 <span>Upload text PDF bill or invoice</span>
                 <span className="mt-1 text-xs">Use one-line AI entry as fallback.</span>
                 <input className="hidden" type="file" accept="application/pdf,image/*" onChange={(event) => void uploadPdf(event.target.files?.[0] ?? null)} />
@@ -366,11 +458,11 @@ export function AiWorkbench() {
 
             <div className="mt-4 grid gap-3 lg:grid-cols-3">
               <PreviewPanel title="Debit/Credit Preview" rows={suggestion.suggestion.lines} />
-              <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+              <div className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
                 <h3 className="mb-2 font-medium">GST Preview</h3>
                 {gstPreview.length ? gstPreview.map((line, index) => <LineRow key={`${index}-${line.ledger_name}`} line={line} />) : <p className="text-sm text-muted-foreground">No GST line detected.</p>}
               </div>
-              <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+              <div className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
                 <h3 className="mb-2 font-medium">Review Notes</h3>
                 <p className="text-sm text-muted-foreground">{suggestion.suggestion.explanation}</p>
                 {suggestion.clarification_questions.map((question, index) => <p key={`${index}-${question}`} className="mt-2 rounded-md bg-muted p-2 text-sm">{question}</p>)}
@@ -393,7 +485,7 @@ export function AiWorkbench() {
           {corrections.length ? (
             <div className="grid gap-2 lg:grid-cols-2">
               {corrections.map((item) => (
-                <div key={item.id} className="rounded-xl border border-white/70 bg-white/70 p-3 text-sm">
+                <div key={item.id} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 text-sm">
                   <p className="font-medium">{new Date(item.created_at).toLocaleString("en-IN")}</p>
                   <p className="mt-1 truncate text-muted-foreground">{JSON.stringify(item.corrected_payload)}</p>
                 </div>
@@ -409,10 +501,10 @@ export function AiWorkbench() {
 function ReadinessBadge({ ready, readyText, pendingText }: { ready: boolean; readyText: string; pendingText: string }) {
   return (
     <span className={cn(
-      "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur",
+      "inline-flex min-h-7 items-center justify-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold leading-none backdrop-blur",
       ready
-        ? "border-emerald-200 bg-emerald-50/90 text-emerald-700"
-        : "border-amber-200 bg-amber-50/90 text-amber-700"
+        ? "border-[#14B8A6]/30 bg-[#14B8A6]/10 text-[#9FF5EA]"
+        : "border-[#FF6B00]/30 bg-[#FF6B00]/10 text-[#FDBA74]"
     )}>
       {ready ? <CheckCircle2 size={14} /> : <Loader2 className="animate-spin" size={14} />}
       {ready ? readyText : pendingText}
@@ -420,12 +512,24 @@ function ReadinessBadge({ ready, readyText, pendingText }: { ready: boolean; rea
   );
 }
 
+function isBackendSyncingMessage(message: string) {
+  return message.includes("ABHAY Intelligence is syncing");
+}
+
+function displayWorkbenchError(error: unknown, backendStatus: BackendStatus, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  if (backendStatus === "online" && isBackendSyncingMessage(message)) {
+    return "Backend online. Company data is still loading; refresh or continue in Alpha Demo Mode.";
+  }
+  return message;
+}
+
 function StatusPanel({ status, tone }: { status: string; tone: "loading" | "success" | "error" | "info" }) {
   return (
     <div
       className={cn(
         "glass-card flex items-center gap-2 px-3 py-2 text-sm",
-        tone === "success" && "text-emerald-700",
+        tone === "success" && "text-[#9FF5EA]",
         tone === "error" && "border-destructive/30 bg-destructive/10 text-destructive",
         tone === "loading" && "text-amber-700",
         tone === "info" && "text-muted-foreground"
@@ -454,7 +558,7 @@ function AccuracyPanel({ accuracy }: { accuracy: AiAccuracyDashboard }) {
       <h2 className="mb-3 text-base font-semibold">Accuracy Tracking</h2>
       <div className="grid grid-cols-2 gap-2">
         {stats.map(([label, value]) => (
-          <div key={label} className="rounded-xl border border-white/70 bg-white/70 p-3">
+          <div key={label} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
             <p className="text-xs text-muted-foreground">{label}</p>
             <p className="mt-1 font-semibold">{value}</p>
           </div>
@@ -491,7 +595,7 @@ function OwnerReportPanel({ report }: { report: AiOwnerReport }) {
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+    <div className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 font-semibold">{value}</p>
     </div>
@@ -500,7 +604,7 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 
 function RiskPanel({ title: panelTitle, items, empty }: { title: string; items: string[]; empty: string }) {
   return (
-    <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+    <div className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
       <h3 className="mb-2 font-medium">{panelTitle}</h3>
       {items.length ? (
         <div className="space-y-2">
@@ -515,7 +619,7 @@ function RiskPanel({ title: panelTitle, items, empty }: { title: string; items: 
 
 function PreviewPanel({ title: panelTitle, rows }: { title: string; rows: AiEntryWorkbenchResponse["suggestion"]["lines"] }) {
   return (
-    <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+    <div className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
       <h3 className="mb-2 font-medium">{panelTitle}</h3>
       <div className="space-y-2">{rows.map((line, index) => <LineRow key={`${index}-${line.ledger_name}-${line.debit}-${line.credit}`} line={line} />)}</div>
     </div>
@@ -524,7 +628,7 @@ function PreviewPanel({ title: panelTitle, rows }: { title: string; rows: AiEntr
 
 function LineRow({ line }: { line: AiEntryWorkbenchResponse["suggestion"]["lines"][number] }) {
   return (
-    <div className={cn("rounded-xl border border-white/70 p-2 text-sm", line.ledger_id ? "bg-white/70" : "bg-destructive/10")}>
+    <div className={cn("rounded-xl border border-[#1F2937] p-2 text-sm", line.ledger_id ? "bg-[#111827]/80" : "bg-destructive/10")}>
       <p className="font-medium">{line.ledger_name}</p>
       <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground">
         <span>Dr {formatMoney(line.debit)}</span>
@@ -547,7 +651,7 @@ function ExtractedInvoicePanel({ fields }: { fields: NonNullable<AiEntryWorkbenc
     ["Total", fields.total_amount ? formatMoney(fields.total_amount) : null]
   ];
   return (
-    <div className="mt-4 rounded-xl border border-white/70 bg-white/70 p-3">
+    <div className="mt-4 rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
       <div className="mb-2 flex items-center gap-2"><FileText size={17} className="text-primary" /><h3 className="font-medium">Extracted Invoice</h3></div>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {rows.map(([label, value]) => <p key={label} className="text-sm"><span className="text-muted-foreground">{label}: </span>{value ?? "-"}</p>)}

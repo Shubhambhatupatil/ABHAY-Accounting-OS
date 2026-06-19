@@ -148,10 +148,10 @@ export function InvoicesWorkspace() {
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <select className="premium-select text-slate-900" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
+            <select className="premium-select" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
               {companies.map((company) => <option key={company.id} value={company.id}>{company.legal_name}</option>)}
             </select>
-            <Link className="premium-link text-slate-900" href="/dashboard">Accounting</Link>
+            <Link className="premium-link" href="/dashboard">Accounting</Link>
           </div>
           </div>
         </header>
@@ -180,7 +180,7 @@ export function InvoicesWorkspace() {
             </div>
             <div className="mt-4 space-y-3">
               {lines.map((line, index) => (
-                <div key={index} className="rounded-xl border border-white/70 bg-white/70 p-3 shadow-sm">
+                <div key={index} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 shadow-sm">
                   <Input value={line.description} onChange={(event) => updateLine(index, "description", event.target.value, lines, setLines)} placeholder="Item description" required />
                   <div className="mt-2 grid gap-2 sm:grid-cols-3">
                     <Input value={line.hsn_sac} onChange={(event) => updateLine(index, "hsn_sac", event.target.value, lines, setLines)} placeholder="HSN/SAC" />
@@ -294,7 +294,7 @@ function GstSummary({ rows }: { rows: InvoiceGstSummaryRow[] }) {
 }
 
 function Total({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl border border-white/70 bg-white/70 p-3 shadow-sm"><p className="text-xs text-muted-foreground">{label}</p><p className="font-semibold">{formatMoney(value)}</p></div>;
+  return <div className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 shadow-sm"><p className="text-xs text-muted-foreground">{label}</p><p className="font-semibold">{formatMoney(value)}</p></div>;
 }
 
 function updateLine(index: number, key: keyof DraftLine, value: string, lines: DraftLine[], setLines: (lines: DraftLine[]) => void) {

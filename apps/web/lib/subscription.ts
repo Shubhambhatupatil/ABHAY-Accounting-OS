@@ -151,8 +151,9 @@ export function canUseAdvancedFeature(
   if (!isSubscriptionActive(state)) return false;
   if (!state) return false;
   if (state.status === "active") return true;
+  if (state.status === "trialing") return true;
   if (feature === "invoice_upload") return state.invoiceUploadsUsed < TRIAL_INVOICE_LIMIT;
-  return feature === "reports";
+  return false;
 }
 
 function normalizeStatus(status: string): SubscriptionStatus {

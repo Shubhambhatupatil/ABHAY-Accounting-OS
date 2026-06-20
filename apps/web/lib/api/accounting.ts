@@ -120,6 +120,15 @@ export type DashboardMetrics = {
   payables: string;
 };
 
+export type DebugCounts = {
+  vouchers: number;
+  voucher_lines: number;
+  invoices: number;
+  accounting_entries: number;
+  audit_logs: number;
+  ai_logs: number;
+};
+
 export type TrialBalanceRow = {
   ledger_id: string;
   ledger_name: string;
@@ -295,6 +304,8 @@ export const accountingApi = {
     api<AuditEvent[]>(`/companies/${companyId}/audit-events`, { token }),
   dashboard: (companyId: string, token: string) =>
     api<DashboardMetrics>(`/companies/${companyId}/reports/dashboard`, { token }),
+  debugCounts: (companyId: string, token: string) =>
+    api<DebugCounts>(`/companies/${companyId}/debug-counts`, { token }),
   trialBalance: (companyId: string, token: string) =>
     api<TrialBalanceRow[]>(`/companies/${companyId}/reports/trial-balance`, { token }),
   profitAndLoss: (companyId: string, token: string) =>

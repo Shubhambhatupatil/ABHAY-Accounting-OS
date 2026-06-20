@@ -5,13 +5,24 @@ from io import StringIO
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import AuthenticatedUser, require_user
 from app.domain.accounting.engine import AccountingValidationError, money
-from app.models.accounting import AccountNature, Invoice, InvoiceType, LedgerCategory
+from app.models.accounting import (
+    AccountingEntry,
+    AccountNature,
+    AiLog,
+    AuditLog,
+    Invoice,
+    InvoiceType,
+    JournalEntry,
+    LedgerCategory,
+    Voucher,
+)
 from app.repositories.accounting import AccountingRepository
 from app.schemas.accounting import (
     AccessRequestCreate,
@@ -23,6 +34,7 @@ from app.schemas.accounting import (
     CompanyCreate,
     CompanyResponse,
     DashboardMetrics,
+    DebugCountsResponse,
     DemoCompanyResponse,
     GstRateResponse,
     GstReportResponse,
@@ -326,6 +338,35 @@ def list_ledger_groups(
     return [LedgerGroupResponse.model_validate(group) for group in repo.list_groups(company_id)]
 
 
+@router.get("/companies/{company_id}/debug-counts", response_model=DebugCountsResponse)
+def debug_counts(
+    company_id: UUID,
+    user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> DebugCountsResponse:
+    repo_for_company(company_id, user, db)
+    journal_line_count = db.scalar(
+        select(func.count(JournalEntry.id)).where(JournalEntry.company_id == company_id)
+    ) or 0
+    physical_voucher_lines = 0
+    if inspect(db.bind).has_table("voucher_lines"):
+        physical_voucher_lines = db.execute(
+            text("select count(*) from voucher_lines where company_id = :company_id"),
+            {"company_id": str(company_id)},
+        ).scalar_one()
+
+    return DebugCountsResponse(
+        vouchers=db.scalar(select(func.count(Voucher.id)).where(Voucher.company_id == company_id)) or 0,
+        voucher_lines=int(journal_line_count) + int(physical_voucher_lines),
+        invoices=db.scalar(select(func.count(Invoice.id)).where(Invoice.company_id == company_id)) or 0,
+        accounting_entries=db.scalar(
+            select(func.count(AccountingEntry.id)).where(AccountingEntry.company_id == company_id)
+        ) or 0,
+        audit_logs=db.scalar(select(func.count(AuditLog.id)).where(AuditLog.company_id == company_id)) or 0,
+        ai_logs=db.scalar(select(func.count(AiLog.id)).where(AiLog.company_id == company_id)) or 0,
+    )
+
+
 @router.post("/companies/{company_id}/ledger-groups", response_model=LedgerGroupResponse)
 def create_ledger_group(
     company_id: UUID,
@@ -425,6 +466,12 @@ def create_voucher(
         voucher = repo.create_voucher(company_id, user_uuid(user), payload)
     except AccountingValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        logger.warning("Database unavailable while creating voucher", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Voucher could not be created. Please try again.",
+        ) from exc
     return voucher_response(voucher)
 
 
@@ -589,6 +636,12 @@ def create_invoice(
         return invoice_response(repo.create_invoice(company_id, user_uuid(user), payload))
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        logger.warning("Database unavailable while creating invoice", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Invoice could not be created. Please try again.",
+        ) from exc
 
 
 @router.get("/companies/{company_id}/invoices", response_model=list[InvoiceResponse])

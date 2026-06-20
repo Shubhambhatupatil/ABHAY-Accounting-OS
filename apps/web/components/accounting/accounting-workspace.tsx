@@ -27,6 +27,7 @@ import {
   AuditEvent,
   Company,
   DashboardMetrics,
+  DebugCounts,
   GstReport,
   Ledger,
   LedgerCategory,
@@ -35,7 +36,7 @@ import {
   Voucher,
   VoucherType
 } from "@/lib/api/accounting";
-import { getAccessToken } from "@/lib/auth/demo-auth";
+import { getAccessToken, getLocalDemoToken } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -95,7 +96,7 @@ const gstStates = [
 ] as const;
 const gstRates = ["0%", "5%", "12%", "18%", "28%"];
 
-export function AccountingWorkspace() {
+export function AccountingWorkspace({ initialTab = "dashboard" }: Readonly<{ initialTab?: Tab }>) {
   const supabase = createSupabaseBrowserClient();
   const [token, setToken] = useState<string | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -103,6 +104,7 @@ export function AccountingWorkspace() {
   const [groups, setGroups] = useState<LedgerGroup[]>([]);
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [debugCounts, setDebugCounts] = useState<DebugCounts | null>(null);
   const [trialBalance, setTrialBalance] = useState<TrialBalanceRow[]>([]);
   const [pnl, setPnl] = useState<{ revenue: string; expenses: string; profit: string } | null>(null);
   const [balanceSheet, setBalanceSheet] = useState<{
@@ -116,7 +118,7 @@ export function AccountingWorkspace() {
   const [invoices, setInvoices] = useState<Array<{ id: string; invoice_number: string; total_amount: string }>>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [selectedFinancialYear, setSelectedFinancialYear] = useState("FY 2025-26");
   const [customFinancialYear, setCustomFinancialYear] = useState("");
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
@@ -209,7 +211,7 @@ export function AccountingWorkspace() {
       if (search) query.set("search", search);
       if (natureFilter) query.set("nature", natureFilter);
       const queryString = query.toString() ? `?${query}` : "";
-      const [groupRows, ledgerRows, metricRows, tbRows, pnlRows, bsRows, cfRows, invoiceRows, gstRows, voucherRows, auditRows] =
+      const [groupRows, ledgerRows, metricRows, tbRows, pnlRows, bsRows, cfRows, invoiceRows, gstRows, voucherRows, auditRows, debugRows] =
         await Promise.all([
           accountingApi.groups(selectedCompanyId, token),
           accountingApi.ledgers(selectedCompanyId, token, queryString),
@@ -221,7 +223,8 @@ export function AccountingWorkspace() {
           accountingApi.invoices(selectedCompanyId, token),
           accountingApi.gstReport(selectedCompanyId, token),
           accountingApi.vouchers(selectedCompanyId, token),
-          accountingApi.auditEvents(selectedCompanyId, token).catch(() => [])
+          accountingApi.auditEvents(selectedCompanyId, token).catch(() => []),
+          accountingApi.debugCounts(selectedCompanyId, token).catch(() => null)
         ]);
       setGroups(groupRows);
       setLedgers(ledgerRows);
@@ -234,6 +237,7 @@ export function AccountingWorkspace() {
       setGstReport(gstRows);
       setVouchers(voucherRows);
       setAuditEvents(auditRows);
+      setDebugCounts(debugRows);
       void loadAccessRequests(selectedCompanyId);
       setStatus("Accounting data refreshed");
     } catch (error) {
@@ -259,6 +263,7 @@ export function AccountingWorkspace() {
     [customFinancialYear, selectedFinancialYear, vouchers]
   );
   const inventorySummary = useMemo(() => summarizeInventory(inventoryItems), [inventoryItems]);
+  const showDebugCounts = Boolean(getLocalDemoToken()) || process.env.NEXT_PUBLIC_ALPHA_DEMO_MODE === "true";
 
   async function loadAccessRequests(selectedCompanyId = companyId) {
     if (!token || !selectedCompanyId) return;
@@ -307,6 +312,215 @@ export function AccountingWorkspace() {
     } catch {
       setStatus(`Company ID: ${companyId}`);
     }
+  }
+
+  async function createSampleData() {
+    if (!token || !companyId) {
+      setStatus("Select a company before creating sample data.");
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const groupRows = groups.length ? groups : await accountingApi.groups(companyId, token);
+      const ledgerRows = ledgers.length ? ledgers : await accountingApi.ledgers(companyId, token);
+      const sampleDate = "2026-03-10";
+      const groupByNature = (nature: AccountNature) => groupRows.find((group) => group.account_nature === nature);
+      const expenseGroup = groupByNature("expense") ?? await accountingApi.createGroup(companyId, token, { name: "Sample Expenses", account_nature: "expense" });
+      const assetGroup = groupByNature("asset") ?? await accountingApi.createGroup(companyId, token, { name: "Sample Assets", account_nature: "asset" });
+      const incomeGroup = groupByNature("income") ?? await accountingApi.createGroup(companyId, token, { name: "Sample Income", account_nature: "income" });
+      const liabilityGroup = groupByNature("liability") ?? await accountingApi.createGroup(companyId, token, { name: "Sample Liabilities", account_nature: "liability" });
+      const ledgerMap = new Map(ledgerRows.map((ledger) => [ledger.name.toLowerCase(), ledger]));
+
+      async function ensureLedger(name: string, category: LedgerCategory, accountNature: AccountNature, ledgerGroupId: string) {
+        const existing = ledgerMap.get(name.toLowerCase());
+        if (existing) return existing;
+        const created = await accountingApi.createLedger(companyId, token!, {
+          name,
+          ledger_group_id: ledgerGroupId,
+          category,
+          account_nature: accountNature,
+          opening_balance: "0.00",
+          opening_balance_type: "dr"
+        });
+        ledgerMap.set(created.name.toLowerCase(), created);
+        return created;
+      }
+
+      const cash = await ensureLedger("Sample Cash", "cash", "asset", assetGroup.id);
+      const bank = await ensureLedger("Sample Bank", "bank", "asset", assetGroup.id);
+      const customer = await ensureLedger("Sample Customer", "sundry_debtor", "asset", assetGroup.id);
+      const supplier = await ensureLedger("Sample Supplier", "sundry_creditor", "liability", liabilityGroup.id);
+      const sales = await ensureLedger("Sample Sales", "sales", "income", incomeGroup.id);
+      await ensureLedger("Sample Purchases", "purchase", "expense", expenseGroup.id);
+      await ensureLedger("Sample Input GST", "input_gst", "asset", assetGroup.id);
+      await ensureLedger("Sample Output GST", "output_gst", "liability", liabilityGroup.id);
+      const rent = await ensureLedger("Sample Office Rent", "indirect_expense", "expense", expenseGroup.id);
+
+      await accountingApi.createVoucher(companyId, token, {
+        voucher_type: "receipt",
+        voucher_date: sampleDate,
+        narration: "Sample customer receipt",
+        lines: [
+          { ledger_id: bank.id, debit: "25000.00", credit: "0.00" },
+          { ledger_id: customer.id, debit: "0.00", credit: "25000.00" }
+        ]
+      });
+      await accountingApi.createVoucher(companyId, token, {
+        voucher_type: "payment",
+        voucher_date: sampleDate,
+        narration: "Sample office rent paid",
+        lines: [
+          { ledger_id: rent.id, debit: "12000.00", credit: "0.00" },
+          { ledger_id: cash.id, debit: "0.00", credit: "12000.00" }
+        ]
+      });
+      await accountingApi.createVoucher(companyId, token, {
+        voucher_type: "sales",
+        voucher_date: sampleDate,
+        narration: "Sample sales booking",
+        lines: [
+          { ledger_id: customer.id, debit: "50000.00", credit: "0.00" },
+          { ledger_id: sales.id, debit: "0.00", credit: "50000.00" }
+        ]
+      });
+      await accountingApi.createInvoice(companyId, token, {
+        invoice_type: "sales",
+        invoice_number: `SAMPLE-S-${Date.now()}`,
+        invoice_date: sampleDate,
+        due_date: "2026-03-25",
+        party_ledger_id: customer.id,
+        gst_supply_type: "intra_state",
+        notes: "Sample sales invoice",
+        lines: [{ description: "Sample service", hsn_sac: "9983", quantity: "1", unit: "NOS", unit_price: "30000.00", gst_rate: "18" }]
+      });
+      await accountingApi.createInvoice(companyId, token, {
+        invoice_type: "purchase",
+        invoice_number: `SAMPLE-P-${Date.now()}`,
+        invoice_date: sampleDate,
+        due_date: "2026-03-25",
+        party_ledger_id: supplier.id,
+        gst_supply_type: "intra_state",
+        notes: "Sample purchase invoice",
+        lines: [{ description: "Sample purchase", hsn_sac: "9983", quantity: "1", unit: "NOS", unit_price: "15000.00", gst_rate: "18" }]
+      });
+      setInventoryItems((current) => current.length ? current : [
+        {
+          id: "sample-item-1",
+          name: "Sample Finished Goods",
+          unit: "PCS",
+          hsnSac: "8471",
+          openingStock: 10,
+          purchaseStock: 20,
+          salesStock: 8,
+          rate: 1200
+        },
+        {
+          id: "sample-item-2",
+          name: "Sample Raw Material",
+          unit: "KG",
+          hsnSac: "7208",
+          openingStock: 50,
+          purchaseStock: 25,
+          salesStock: 10,
+          rate: 180
+        }
+      ]);
+      setStatus("Sample data created: ledgers, vouchers, invoices and audit logs refreshed.");
+      await refresh(companyId);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Sample data could not be created.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function createVoucherEntry(payload: unknown) {
+    if (!companyId) {
+      setStatus("Please select a company first.");
+      return false;
+    }
+    if (!token) {
+      setStatus("Please login again.");
+      return false;
+    }
+    setIsBusy(true);
+    try {
+      await accountingApi.createVoucher(companyId, token, payload);
+      setStatus("Voucher created successfully.");
+      await refresh(companyId);
+      return true;
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("ABHAY voucher create failed", error);
+      }
+      setStatus(error instanceof Error ? error.message : "Voucher could not be created.");
+      return false;
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function createInvoiceEntry(payload: unknown) {
+    if (!companyId) {
+      setStatus("Please select a company first.");
+      return false;
+    }
+    if (!token) {
+      setStatus("Please login again.");
+      return false;
+    }
+    setIsBusy(true);
+    try {
+      await ensureInvoicePostingLedgers(payload);
+      await accountingApi.createInvoice(companyId, token, payload);
+      setStatus("Invoice created successfully.");
+      await refresh(companyId);
+      return true;
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("ABHAY invoice create failed", error);
+      }
+      setStatus(error instanceof Error ? error.message : "Invoice could not be created.");
+      return false;
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function ensureInvoicePostingLedgers(payload: unknown) {
+    if (!token || !companyId) return;
+    const invoiceType = typeof payload === "object" && payload && "invoice_type" in payload
+      ? String((payload as { invoice_type?: unknown }).invoice_type)
+      : "sales";
+    const groupRows = groups.length ? groups : await accountingApi.groups(companyId, token);
+    const ledgerRows = ledgers.length ? ledgers : await accountingApi.ledgers(companyId, token);
+    const ledgerMap = new Map(ledgerRows.map((ledger) => [ledger.category, ledger]));
+    const groupByNature = (nature: AccountNature) => groupRows.find((group) => group.account_nature === nature);
+    const incomeGroup = groupByNature("income") ?? await accountingApi.createGroup(companyId, token, { name: "Income", account_nature: "income" });
+    const expenseGroup = groupByNature("expense") ?? await accountingApi.createGroup(companyId, token, { name: "Expenses", account_nature: "expense" });
+    const assetGroup = groupByNature("asset") ?? await accountingApi.createGroup(companyId, token, { name: "Assets", account_nature: "asset" });
+    const liabilityGroup = groupByNature("liability") ?? await accountingApi.createGroup(companyId, token, { name: "Liabilities", account_nature: "liability" });
+
+    async function ensureCategoryLedger(name: string, category: LedgerCategory, accountNature: AccountNature, ledgerGroupId: string) {
+      if (ledgerMap.has(category)) return;
+      const ledger = await accountingApi.createLedger(companyId, token!, {
+        name,
+        ledger_group_id: ledgerGroupId,
+        category,
+        account_nature: accountNature,
+        opening_balance: "0.00",
+        opening_balance_type: "dr"
+      });
+      ledgerMap.set(category, ledger);
+    }
+
+    if (invoiceType === "purchase") {
+      await ensureCategoryLedger("Purchases", "purchase", "expense", expenseGroup.id);
+      await ensureCategoryLedger("Input GST", "input_gst", "asset", assetGroup.id);
+      return;
+    }
+    await ensureCategoryLedger("Sales", "sales", "income", incomeGroup.id);
+    await ensureCategoryLedger("Output GST", "output_gst", "liability", liabilityGroup.id);
   }
 
   return (
@@ -365,6 +579,17 @@ export function AccountingWorkspace() {
         </nav>
 
         <p className="glass-card px-3 py-2 text-sm text-muted-foreground">{status}</p>
+
+        {showDebugCounts ? (
+          <section className="glass-card grid gap-3 p-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
+            <MiniStat label="Vouchers" value={debugCounts?.vouchers ?? 0} />
+            <MiniStat label="Voucher Lines" value={debugCounts?.voucher_lines ?? 0} />
+            <MiniStat label="Invoices" value={debugCounts?.invoices ?? 0} />
+            <MiniStat label="Accounting Entries" value={debugCounts?.accounting_entries ?? 0} />
+            <MiniStat label="Audit Logs" value={debugCounts?.audit_logs ?? 0} />
+            <MiniStat label="AI Logs" value={debugCounts?.ai_logs ?? 0} />
+          </section>
+        ) : null}
 
         <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
           <form
@@ -448,9 +673,8 @@ export function AccountingWorkspace() {
             ledgers={ledgers}
             vouchers={fyFilteredVouchers}
             activeFinancialYear={activeFinancialYear}
-            onPost={(payload) =>
-              token ? accountingApi.createVoucher(companyId, token, payload).then(() => refresh()) : null
-            }
+            onCreateSampleData={createSampleData}
+            onPost={createVoucherEntry}
           />
         ) : null}
         {tab === "invoices" ? (
@@ -459,9 +683,7 @@ export function AccountingWorkspace() {
             invoices={invoices}
             companyId={companyId}
             token={token}
-            onCreate={(payload) =>
-              token ? accountingApi.createInvoice(companyId, token, payload).then(() => refresh()) : null
-            }
+            onCreate={createInvoiceEntry}
           />
         ) : null}
         {tab === "reports" ? (
@@ -537,8 +759,13 @@ function DashboardPanel({
           <div>
             <h2 className="text-lg font-semibold">{companyName}</h2>
             <p className="text-sm text-muted-foreground">
-              {activeFinancialYear} Alpha view · {voucherCount} vouchers in selected FY where client-side filtering applies
+              {activeFinancialYear} · {voucherCount} vouchers in selected FY
             </p>
+            {voucherCount === 0 ? (
+              <p className="mt-1 text-xs text-[#FDBA74]">
+                No vouchers found for this financial year. Create voucher or sample data.
+              </p>
+            ) : null}
           </div>
           <span className="ai-badge w-fit">Multi-Year Alpha</span>
         </div>
@@ -686,11 +913,13 @@ function VouchersPanel({
   ledgers,
   vouchers,
   activeFinancialYear,
+  onCreateSampleData,
   onPost
 }: {
   ledgers: Ledger[];
   vouchers: Voucher[];
   activeFinancialYear: string;
+  onCreateSampleData: () => Promise<void>;
   onPost: (payload: unknown) => Promise<unknown> | false | null;
 }) {
   const [voucherType, setVoucherType] = useState<VoucherType>("journal");
@@ -772,7 +1001,16 @@ function VouchersPanel({
               </div>
               <p className="mt-1 text-xs text-muted-foreground">{voucher.voucher_date} · {voucher.status}</p>
             </div>
-          )) : <p className="empty-state">No vouchers found for this financial year view.</p>}
+          )) : (
+            <div className="empty-state space-y-3">
+              <p>No vouchers found for this financial year. Create voucher or sample data.</p>
+              <p className="text-xs text-muted-foreground">Use the voucher form on the left to create your first voucher/entry.</p>
+              <Button type="button" onClick={() => void onCreateSampleData()}>
+                <Plus size={17} />
+                Create Sample Data
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </section>

@@ -15,6 +15,27 @@ from app.core.security import LOCAL_DEMO_TOKEN
 
 
 client = TestClient(app)
+AUTH_HEADERS = {"Authorization": f"Bearer {LOCAL_DEMO_TOKEN}"}
+
+
+def with_isolated_database() -> sessionmaker:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def override_db():
+        db = session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    return session_factory
 
 
 def test_balanced_voucher_is_valid() -> None:
@@ -91,26 +112,11 @@ def test_launch_pack_gstr_csv_routes_are_registered() -> None:
 
 
 def test_demo_company_creation_returns_company_id() -> None:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-    def override_db():
-        db = session_factory()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    app.dependency_overrides[get_db] = override_db
+    with_isolated_database()
     try:
         response = client.post(
             "/demo/company",
-            headers={"Authorization": f"Bearer {LOCAL_DEMO_TOKEN}"},
+            headers=AUTH_HEADERS,
         )
     finally:
         app.dependency_overrides.pop(get_db, None)
@@ -120,3 +126,78 @@ def test_demo_company_creation_returns_company_id() -> None:
     assert body["company_id"]
     assert body["legal_name"] == "ABHAY Demo Traders"
     assert "ProgrammingError" not in response.text
+
+
+def test_voucher_create_persists_posting_rows() -> None:
+    with_isolated_database()
+    try:
+        company_id = client.post("/demo/company", headers=AUTH_HEADERS).json()["company_id"]
+        ledgers = client.get(f"/companies/{company_id}/ledgers", headers=AUTH_HEADERS).json()
+        bank = next(ledger for ledger in ledgers if ledger["category"] == "bank")
+        customer = next(ledger for ledger in ledgers if ledger["category"] == "sundry_debtor")
+        before = client.get(f"/companies/{company_id}/debug-counts", headers=AUTH_HEADERS).json()
+
+        response = client.post(
+            f"/companies/{company_id}/vouchers",
+            headers=AUTH_HEADERS,
+            json={
+                "voucher_type": "receipt",
+                "voucher_date": "2026-03-15",
+                "narration": "Test receipt",
+                "lines": [
+                    {"ledger_id": bank["id"], "debit": "1000.00", "credit": "0.00"},
+                    {"ledger_id": customer["id"], "debit": "0.00", "credit": "1000.00"},
+                ],
+            },
+        )
+        after = client.get(f"/companies/{company_id}/debug-counts", headers=AUTH_HEADERS).json()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    assert after["vouchers"] == before["vouchers"] + 1
+    assert after["voucher_lines"] == before["voucher_lines"] + 2
+    assert after["accounting_entries"] >= before["accounting_entries"] + 2
+    assert after["audit_logs"] >= before["audit_logs"] + 1
+
+
+def test_invoice_create_persists_invoice_and_audit_rows() -> None:
+    with_isolated_database()
+    try:
+        company_id = client.post("/demo/company", headers=AUTH_HEADERS).json()["company_id"]
+        ledgers = client.get(f"/companies/{company_id}/ledgers", headers=AUTH_HEADERS).json()
+        customer = next(ledger for ledger in ledgers if ledger["category"] == "sundry_debtor")
+        before = client.get(f"/companies/{company_id}/debug-counts", headers=AUTH_HEADERS).json()
+
+        response = client.post(
+            f"/companies/{company_id}/invoices",
+            headers=AUTH_HEADERS,
+            json={
+                "invoice_type": "sales",
+                "invoice_number": "TEST-SALES-001",
+                "invoice_date": "2026-03-16",
+                "due_date": "2026-03-31",
+                "party_ledger_id": customer["id"],
+                "gst_supply_type": "intra_state",
+                "notes": "Test invoice",
+                "lines": [
+                    {
+                        "description": "Test service",
+                        "hsn_sac": "9983",
+                        "quantity": "1",
+                        "unit": "NOS",
+                        "unit_price": "5000.00",
+                        "gst_rate": "18.00",
+                    }
+                ],
+            },
+        )
+        after = client.get(f"/companies/{company_id}/debug-counts", headers=AUTH_HEADERS).json()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    assert after["invoices"] == before["invoices"] + 1
+    assert after["vouchers"] == before["vouchers"] + 1
+    assert after["accounting_entries"] >= before["accounting_entries"] + 3
+    assert after["audit_logs"] >= before["audit_logs"] + 2

@@ -1,5 +1,5 @@
-import { EntriesLedgerWorkspace } from "@/components/saas/launch-workspaces";
+import { AccountingWorkspace } from "@/components/accounting/accounting-workspace";
 
 export default function EntriesPage() {
-  return <EntriesLedgerWorkspace />;
+  return <AccountingWorkspace initialTab="vouchers" />;
 }

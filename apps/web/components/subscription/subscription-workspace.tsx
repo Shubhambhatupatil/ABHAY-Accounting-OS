@@ -47,7 +47,7 @@ export function SubscriptionWorkspace() {
     }
 
     if (plan === "enterprise") {
-      window.location.href = "mailto:contact@anvritai.com?subject=ABHAY%20Enterprise%20Plan";
+      window.location.href = "mailto:founder@anvritai.com?subject=ABHAY%20Enterprise%20Plan%20Inquiry";
       return;
     }
 

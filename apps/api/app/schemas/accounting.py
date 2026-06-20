@@ -54,6 +54,15 @@ class DemoCompanyResponse(BaseModel):
     seeded_bank_transactions: int
 
 
+class DebugCountsResponse(BaseModel):
+    vouchers: int
+    voucher_lines: int
+    invoices: int
+    accounting_entries: int
+    audit_logs: int
+    ai_logs: int
+
+
 class LedgerGroupCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     account_nature: AccountNature

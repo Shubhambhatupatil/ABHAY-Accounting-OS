@@ -1,4 +1,5 @@
 import { publicEnv } from "@/lib/config";
+import { safeApiErrorMessage } from "@/lib/api/safe-error";
 import type { AiSuggestion, ConfirmAiPostingResponse } from "@/lib/api/ai-accountant";
 
 export type AiEntryWorkbenchResponse = {
@@ -77,7 +78,7 @@ async function api<T>(path: string, token: string, options: { method?: string; b
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(typeof error.detail === "string" ? error.detail : "Request failed");
+    throw new Error(safeApiErrorMessage(error.detail, "AI entry request could not be completed. Please try again."));
   }
 
   return response.json() as Promise<T>;

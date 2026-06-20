@@ -140,6 +140,15 @@ create table if not exists audit_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists site_visits (
+  id uuid primary key default gen_random_uuid(),
+  path text not null,
+  referrer text,
+  user_agent text,
+  ip_hash text not null,
+  created_at timestamptz not null default now()
+);
+
 alter table vouchers
   add column if not exists company_id uuid references companies(id) on delete cascade;
 
@@ -179,6 +188,9 @@ create index if not exists ai_logs_profile_id_idx on ai_logs(profile_id);
 create index if not exists ai_logs_user_id_idx on ai_logs(user_id);
 create index if not exists audit_logs_company_id_idx on audit_logs(company_id);
 create index if not exists audit_logs_entity_idx on audit_logs(entity_type, entity_id);
+create index if not exists site_visits_created_at_idx on site_visits(created_at desc);
+create index if not exists site_visits_path_idx on site_visits(path);
+create index if not exists site_visits_ip_hash_idx on site_visits(ip_hash);
 
 create or replace function public.abhay_user_has_company_access(target_company_id uuid)
 returns boolean
@@ -262,6 +274,10 @@ alter table invoices enable row level security;
 alter table accounting_entries enable row level security;
 alter table ai_logs enable row level security;
 alter table audit_logs enable row level security;
+alter table site_visits enable row level security;
+
+grant insert on site_visits to anon, authenticated;
+grant select on site_visits to authenticated;
 
 do $$
 begin
@@ -383,5 +399,19 @@ begin
       to authenticated
       using (company_id is null or public.abhay_user_has_company_access(company_id))
       with check (company_id is null or public.abhay_user_has_company_access(company_id));
+  end if;
+
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'site_visits' and policyname = 'public can insert privacy safe site visits') then
+    create policy "public can insert privacy safe site visits"
+      on site_visits for insert
+      to anon, authenticated
+      with check (true);
+  end if;
+
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'site_visits' and policyname = 'authenticated users can read site visits') then
+    create policy "authenticated users can read site visits"
+      on site_visits for select
+      to authenticated
+      using (true);
   end if;
 end $$;

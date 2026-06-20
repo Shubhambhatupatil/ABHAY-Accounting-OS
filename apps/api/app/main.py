@@ -1,8 +1,11 @@
 from collections.abc import AsyncIterator
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes.accounting import router as accounting_router
 from app.api.routes.ai_accountant import router as ai_accountant_router
@@ -16,6 +19,15 @@ from app.core.config import get_settings
 from app.core.database import create_alpha_schema_if_needed
 
 SYSTEM_STATUS = {"status": "ok", "service": "abhay-api", "ai_engine": "ready"}
+RATE_LIMIT_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
+RATE_LIMIT_WINDOW_SECONDS = 60
+RATE_LIMIT_MAX_REQUESTS = 120
+RATE_LIMITED_PREFIXES = (
+    "/auth",
+    "/ai/command",
+    "/ai-entry",
+    "/companies",
+)
 
 
 @asynccontextmanager
@@ -41,6 +53,36 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        return response
+
+    @app.middleware("http")
+    async def rate_limit_sensitive_routes(request: Request, call_next):
+        if request.method == "OPTIONS" or not request.url.path.startswith(RATE_LIMITED_PREFIXES):
+            return await call_next(request)
+
+        client_ip = get_client_ip(request)
+        bucket_key = f"{client_ip}:{request.url.path}"
+        now = time.monotonic()
+        bucket = RATE_LIMIT_BUCKETS[bucket_key]
+        while bucket and now - bucket[0] > RATE_LIMIT_WINDOW_SECONDS:
+            bucket.popleft()
+
+        if len(bucket) >= RATE_LIMIT_MAX_REQUESTS:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please wait a moment and try again."},
+            )
+
+        bucket.append(now)
+        return await call_next(request)
     app.include_router(auth_router, prefix="/auth", tags=["auth"])
     app.include_router(accounting_router, tags=["accounting"])
     app.include_router(ai_accountant_router)
@@ -73,3 +115,10 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"

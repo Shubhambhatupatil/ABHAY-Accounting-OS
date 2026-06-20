@@ -1,4 +1,5 @@
 import { publicEnv } from "@/lib/config";
+import { safeApiErrorMessage } from "@/lib/api/safe-error";
 
 export type BankTransaction = {
   id: string;
@@ -41,7 +42,7 @@ async function request<T>(path: string, token: string, options: { method?: strin
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(typeof error.detail === "string" ? error.detail : "Request failed");
+    throw new Error(safeApiErrorMessage(error.detail, "Bank reconciliation request could not be completed. Please try again."));
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

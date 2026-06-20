@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   BadgeCheck,
@@ -61,6 +62,7 @@ const gstStates = [
 ] as const;
 
 const roles: CompanyRole[] = ["Owner", "Admin", "Accountant", "Auditor", "Viewer"];
+const LAST_COMPANY_KEY = "abhay.lastCompanyId";
 
 const sampleLedgers = [
   ["Cash", "Asset", "₹48,500"],
@@ -70,6 +72,21 @@ const sampleLedgers = [
   ["Input GST", "Asset", "₹18,250"],
   ["Output GST", "Liability", "₹42,700"]
 ];
+
+type AnalyticsSummary = {
+  totalVisits: number;
+  visitsToday: number;
+  uniqueVisitors: number;
+  topPages: Array<{ path: string; visits: number }>;
+  lastVisits: Array<{
+    path: string;
+    referrer: string | null;
+    createdAt: string;
+    device: string;
+    browser: string;
+  }>;
+  message: string | null;
+};
 
 export function UploadInvoiceWorkspace() {
   const { subscription } = useSubscriptionState();
@@ -473,6 +490,7 @@ export function ReportsWorkspace() {
 }
 
 export function SettingsWorkspace() {
+  const router = useRouter();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [form, setForm] = useState({
     companyName: "",
@@ -488,23 +506,48 @@ export function SettingsWorkspace() {
   const [inviteRole, setInviteRole] = useState<CompanyRole>("Accountant");
   const [status, setStatus] = useState("Complete onboarding once to prepare ABHAY for pilot use.");
   const [isBusy, setIsBusy] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
-    listWorkspaceCompanies(supabase)
-      .then((rows) => {
-        if (!active) return;
-        setCompanies(rows);
-        setSelectedCompanyId(rows[0]?.id ?? "");
-        setStatus(rows.length ? "Company workspace loaded." : "Create your first company workspace.");
-      })
-      .catch((error: Error) => {
-        if (active) setStatus(error.message);
-      });
+    void loadCompanies(() => active);
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
+
+  async function loadCompanies(isActive = () => true) {
+    setLoadFailed(false);
+    setStatus("Loading company workspace...");
+    try {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+      const rows = await listWorkspaceCompanies(supabase);
+      const savedCompanyId = typeof window === "undefined" ? "" : window.localStorage.getItem(LAST_COMPANY_KEY) ?? "";
+      const selectedCompany = rows.find((company) => company.id === savedCompanyId) ?? rows[0];
+      if (process.env.NODE_ENV === "development") {
+        console.log("ABHAY settings company load", {
+          userId: user?.id ?? "missing",
+          companyCount: rows.length,
+          selectedCompanyId: selectedCompany?.id ?? ""
+        });
+      }
+      if (isActive()) {
+        setCompanies(rows);
+        setSelectedCompanyId(selectedCompany?.id ?? "");
+        setStatus(rows.length ? "Company workspace loaded." : "Create your first company workspace.");
+      }
+    } catch {
+      if (isActive()) {
+        setLoadFailed(true);
+        setCompanies([]);
+        setSelectedCompanyId("");
+        setStatus("Unable to load companies. Retry");
+      }
+    }
+  }
 
   useEffect(() => {
     if (!selectedCompanyId) {
@@ -529,12 +572,30 @@ export function SettingsWorkspace() {
       });
       setCompanies((current) => [company, ...current.filter((item) => item.id !== company.id)]);
       setSelectedCompanyId(company.id);
-      setStatus("Company workspace created. You are the Owner.");
+      persistSelectedCompany(company.id);
+      setStatus("Company workspace created. You are the Owner. Opening dashboard...");
+      router.push("/dashboard");
+      router.refresh();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Company workspace could not be saved.");
     } finally {
       setIsBusy(false);
     }
+  }
+
+  function continueToDashboard() {
+    const targetCompanyId = selectedCompanyId || companies[0]?.id;
+    if (!targetCompanyId) {
+      setStatus("Create a company first, then continue to Dashboard.");
+      return;
+    }
+    persistSelectedCompany(targetCompanyId);
+    if (process.env.NODE_ENV === "development") {
+      console.log("ABHAY settings selected company", { selectedCompanyId: targetCompanyId });
+    }
+    setStatus("Company selected. Opening dashboard...");
+    router.push("/dashboard");
+    router.refresh();
   }
 
   async function inviteMember() {
@@ -572,7 +633,45 @@ export function SettingsWorkspace() {
       title="Business Onboarding"
       subtitle="Capture company context for GST, imports, financial year selection, and AI accounting memory."
     >
+      <section className="glass-panel p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Select Company</h2>
+            <p className="mt-2 text-sm leading-6 text-white/60">
+              Choose your active company workspace, then continue to the ABHAY dashboard.
+            </p>
+          </div>
+          {loadFailed ? (
+            <Button type="button" variant="secondary" onClick={() => void loadCompanies()} disabled={isBusy}>
+              Retry
+            </Button>
+          ) : null}
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto]">
+          <select
+            className="premium-select h-11 w-full"
+            value={selectedCompanyId}
+            onChange={(event) => setSelectedCompanyId(event.target.value)}
+            disabled={!companies.length}
+          >
+            <option value="">{companies.length ? "Select company" : "No company found"}</option>
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>{company.company_name}</option>
+            ))}
+          </select>
+          <Button type="button" onClick={continueToDashboard} disabled={isBusy || !companies.length}>
+            Continue to Dashboard
+          </Button>
+        </div>
+      </section>
+
       <form className="glass-panel grid gap-4 p-5 lg:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+        <div className="lg:col-span-2">
+          <h2 className="text-lg font-semibold text-white">{companies.length ? "Register / Add Company" : "Create Company"}</h2>
+          <p className="mt-2 text-sm leading-6 text-white/60">
+            {companies.length ? "Add another business workspace when needed." : "No company exists yet. Create your first company to unlock Dashboard, AI Workbench and Reports."}
+          </p>
+        </div>
         <Field label="Company Name"><Input value={form.companyName} onChange={(event) => setForm({ ...form, companyName: event.target.value })} required /></Field>
         <Field label="GSTIN"><Input value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value.toUpperCase() })} maxLength={15} placeholder="27ABCDE1234F1Z5" /></Field>
         <Field label="Industry"><Input value={form.industry} onChange={(event) => setForm({ ...form, industry: event.target.value })} /></Field>
@@ -582,14 +681,6 @@ export function SettingsWorkspace() {
           </select>
         </Field>
         <Field label="Financial year"><Input value={form.financialYear} onChange={(event) => setForm({ ...form, financialYear: event.target.value })} /></Field>
-        <Field label="Active company workspace">
-          <select className="premium-select h-11 w-full" value={selectedCompanyId} onChange={(event) => setSelectedCompanyId(event.target.value)}>
-            <option value="">No company selected</option>
-            {companies.map((company) => (
-              <option key={company.id} value={company.id}>{company.company_name}</option>
-            ))}
-          </select>
-        </Field>
         <div className="lg:col-span-2"><Button type="submit" disabled={isBusy || !form.companyName.trim()}><BadgeCheck size={17} /> Create company workspace</Button></div>
       </form>
 
@@ -631,7 +722,42 @@ export function SettingsWorkspace() {
   );
 }
 
+function persistSelectedCompany(companyId: string) {
+  window.localStorage.setItem(LAST_COMPANY_KEY, companyId);
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `abhay_selected_company_id=${encodeURIComponent(companyId)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+}
+
 export function AdminWorkspace() {
+  const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
+  const [analyticsStatus, setAnalyticsStatus] = useState("Loading visitor analytics...");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAnalytics() {
+      try {
+        const response = await fetch("/api/analytics/summary", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Analytics unavailable");
+        }
+        const data = (await response.json()) as AnalyticsSummary;
+        if (!cancelled) {
+          setAnalytics(data);
+          setAnalyticsStatus(data.message ?? "Visitor analytics ready.");
+        }
+      } catch {
+        if (!cancelled) {
+          setAnalytics(null);
+          setAnalyticsStatus("Analytics is syncing. Visit data will appear after the table is installed.");
+        }
+      }
+    }
+    void loadAnalytics();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <PageFrame
       icon={ShieldCheck}
@@ -643,6 +769,39 @@ export function AdminWorkspace() {
         <InfoCard title="Subscription Store" copy="Supabase tables store profiles, trials, subscriptions, and payments for pilot access control." />
         <InfoCard title="Access Control" copy="Company data remains scoped through backend membership checks and owner access request approval." />
         <InfoCard title="Security Note" copy="Frontend uses publishable keys only. Razorpay secret is server-side only." />
+      </section>
+      <section className="mt-4 grid gap-4 lg:grid-cols-3">
+        <MetricCard title="Total Visits" value={analytics ? String(analytics.totalVisits) : "0"} copy="Privacy-safe page visits tracked without raw IP storage." />
+        <MetricCard title="Visits Today" value={analytics ? String(analytics.visitsToday) : "0"} copy="Based on server-side visit events received today." />
+        <MetricCard title="Unique Visitors" value={analytics ? String(analytics.uniqueVisitors) : "0"} copy="Estimated from salted IP hashes only." />
+      </section>
+      <section className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="glass-card p-5">
+          <h2 className="text-base font-semibold text-white">Top pages</h2>
+          <p className="mt-2 text-sm leading-6 text-white/60">{analyticsStatus}</p>
+          <div className="mt-4 space-y-2">
+            {analytics?.topPages.length ? analytics.topPages.map((page) => (
+              <div key={page.path} className="flex items-center justify-between gap-3 rounded-xl border border-[#1F2937] bg-[#111827]/80 px-3 py-2 text-sm">
+                <span className="truncate text-white/70">{page.path}</span>
+                <span className="font-semibold text-white">{page.visits}</span>
+              </div>
+            )) : <p className="empty-state">No visit data yet.</p>}
+          </div>
+        </div>
+        <div className="glass-card p-5">
+          <h2 className="text-base font-semibold text-white">Last 20 visits</h2>
+          <div className="mt-4 max-h-80 space-y-2 overflow-y-auto pr-1">
+            {analytics?.lastVisits.length ? analytics.lastVisits.map((visit, index) => (
+              <div key={`${visit.createdAt}-${index}`} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="truncate font-semibold text-white">{visit.path}</span>
+                  <span className="text-xs text-white/50">{new Date(visit.createdAt).toLocaleString("en-IN")}</span>
+                </div>
+                <p className="mt-1 text-xs text-white/50">{visit.device} • {visit.browser}</p>
+              </div>
+            )) : <p className="empty-state">Recent visits will appear here after traffic starts.</p>}
+          </div>
+        </div>
       </section>
       <div className="glass-card mt-4 p-5">
         <div className="flex items-start gap-3">

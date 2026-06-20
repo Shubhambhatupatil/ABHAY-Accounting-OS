@@ -1,4 +1,5 @@
 import { publicEnv } from "@/lib/config";
+import { safeApiErrorMessage } from "@/lib/api/safe-error";
 
 export type Company = {
   id: string;
@@ -238,7 +239,7 @@ async function api<T>(path: string, options: ApiOptions): Promise<T> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(typeof error.detail === "string" ? error.detail : `API request failed with status ${response.status}`);
+    throw new Error(safeApiErrorMessage(error.detail, "Accounting request could not be completed. Please try again."));
   }
 
   if (response.status === 204) {

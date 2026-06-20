@@ -1,4 +1,5 @@
 import { publicEnv } from "@/lib/config";
+import { safeApiErrorMessage } from "@/lib/api/safe-error";
 import type { AiSuggestion } from "@/lib/api/ai-accountant";
 
 export type AiCfoDashboard = {
@@ -38,7 +39,7 @@ async function request<T>(path: string, token: string, options: { method?: strin
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(typeof error.detail === "string" ? error.detail : "Request failed");
+    throw new Error(safeApiErrorMessage(error.detail, "Automation request could not be completed. Please try again."));
   }
   return response.json() as Promise<T>;
 }

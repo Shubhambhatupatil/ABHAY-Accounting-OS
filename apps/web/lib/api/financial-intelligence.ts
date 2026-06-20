@@ -1,4 +1,5 @@
 import { publicEnv } from "@/lib/config";
+import { safeApiErrorMessage } from "@/lib/api/safe-error";
 
 export type Insight = {
   title: string;
@@ -39,7 +40,7 @@ async function get<T>(path: string, token: string): Promise<T> {
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(typeof error.detail === "string" ? error.detail : "Request failed");
+    throw new Error(safeApiErrorMessage(error.detail, "Financial intelligence request could not be completed. Please try again."));
   }
   return response.json() as Promise<T>;
 }

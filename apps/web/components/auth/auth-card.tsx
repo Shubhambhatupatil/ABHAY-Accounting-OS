@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Loader2, LogIn, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { writeClientAuditLog } from "@/lib/api/audit";
 import { verifyApiSession } from "@/lib/api/auth";
 import { isAlphaDemoModeEnabled, startLocalDemoSession } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
@@ -87,6 +88,7 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
       const accessToken = result.data.session?.access_token;
       if (accessToken) {
         await verifyBackendSessionIfAvailable(accessToken);
+        await writeClientAuditLog(supabase, "auth.login", "auth", { email: normalizedEmail });
         const redirectPath = await getPostLoginPath();
         setSuccess(redirectPath === "/dashboard" ? "Login successful. Opening dashboard..." : "Login successful. Opening company setup...");
         router.push(redirectPath);

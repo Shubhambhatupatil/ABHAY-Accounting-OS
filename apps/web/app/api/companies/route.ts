@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeApiErrorMessage } from "@/lib/api/safe-error";
 
 const fallbackApiUrl = "https://abhay-api-x027.onrender.com";
 
@@ -20,7 +21,10 @@ export async function GET(request: Request) {
       }
     });
     const data = await response.json().catch(() => ({ detail: "Unable to load companies." }));
-    return NextResponse.json(data, { status: response.ok ? 200 : response.status });
+    if (!response.ok) {
+      return NextResponse.json({ detail: safeApiErrorMessage(data.detail, "Unable to load companies.") }, { status: response.status });
+    }
+    return NextResponse.json(data);
   } catch {
     return NextResponse.json({ detail: "ABHAY backend is temporarily unavailable." }, { status: 502 });
   }
@@ -39,7 +43,10 @@ export async function POST(request: Request) {
       body: JSON.stringify(body ?? {})
     });
     const data = await response.json().catch(() => ({ detail: "Unable to create company." }));
-    return NextResponse.json(data, { status: response.ok ? 200 : response.status });
+    if (!response.ok) {
+      return NextResponse.json({ detail: safeApiErrorMessage(data.detail, "Unable to create company.") }, { status: response.status });
+    }
+    return NextResponse.json(data);
   } catch {
     return NextResponse.json({ detail: "ABHAY backend is temporarily unavailable." }, { status: 502 });
   }

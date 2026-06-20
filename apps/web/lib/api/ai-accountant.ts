@@ -1,4 +1,5 @@
 import { publicEnv } from "@/lib/config";
+import { safeApiErrorMessage } from "@/lib/api/safe-error";
 import type { LedgerCategory, VoucherType, Voucher } from "@/lib/api/accounting";
 
 export type AiSuggestion = {
@@ -47,7 +48,7 @@ async function api<T>(path: string, token: string, body: unknown): Promise<T> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(typeof error.detail === "string" ? error.detail : "Request failed");
+    throw new Error(safeApiErrorMessage(error.detail, "AI accountant request could not be completed. Please try again."));
   }
 
   return response.json() as Promise<T>;

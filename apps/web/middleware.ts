@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
 
-const protectedPaths = ["/dashboard", "/upload-invoice", "/reports", "/ai-workbench"];
+const protectedPaths = ["/dashboard", "/upload-invoice", "/reports", "/ai-workbench", "/admin"];
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -11,7 +11,8 @@ export async function middleware(request: NextRequest) {
 
   if (
     process.env.NEXT_PUBLIC_ALPHA_DEMO_MODE === "true" &&
-    request.cookies.get("abhay_alpha_demo")?.value === "true"
+    request.cookies.get("abhay_alpha_demo")?.value === "true" &&
+    !isAdminPath(pathname)
   ) {
     return NextResponse.next();
   }
@@ -63,8 +64,12 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/upload-invoice/:path*", "/reports/:path*", "/ai-workbench/:path*"]
+  matcher: ["/dashboard/:path*", "/upload-invoice/:path*", "/reports/:path*", "/ai-workbench/:path*", "/admin/:path*"]
 };
+
+function isAdminPath(pathname: string) {
+  return pathname === "/admin" || pathname.startsWith("/admin/");
+}
 
 async function getOrCreateServerSubscription(
   supabase: ReturnType<typeof createServerClient>,
@@ -143,6 +148,14 @@ async function userHasCompanyMembership(supabase: ReturnType<typeof createServer
     .eq("user_id", userId)
     .limit(1);
 
-  if (error) return false;
-  return Boolean(data?.length);
+  if (!error && data?.length) return true;
+
+  const { data: profileData, error: profileError } = await supabase
+    .from("company_members")
+    .select("id")
+    .eq("profile_id", userId)
+    .limit(1);
+
+  if (profileError) return false;
+  return Boolean(profileData?.length);
 }

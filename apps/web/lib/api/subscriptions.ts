@@ -1,6 +1,7 @@
 "use client";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { writeClientAuditLog } from "@/lib/api/audit";
 import { getLocalDemoToken, LOCAL_DEMO_TOKEN } from "@/lib/auth/demo-auth";
 import {
   createDemoSubscriptionState,
@@ -96,6 +97,11 @@ export async function activateSubscriptionPlan(
     if (paymentError) {
       throw new Error("Payment captured, but subscription sync failed. Contact ANVRITAI support.");
     }
+    await writeClientAuditLog(supabase, "payment.success", "payment", {
+      plan: planName,
+      amount,
+      razorpay_payment_id: razorpayPaymentId
+    });
   }
 
   const query = current?.id
@@ -127,6 +133,13 @@ export async function activateSubscriptionPlan(
   if (error) {
     throw new Error("Subscription could not be updated. Please try again.");
   }
+
+  await writeClientAuditLog(
+    supabase,
+    plan === "trial" ? "subscription.trial_activated" : "subscription.activated",
+    "subscription",
+    { plan: planName, status: plan === "trial" ? "trialing" : "active" }
+  );
 
   return mapSubscriptionRow(data);
 }

@@ -88,6 +88,16 @@ def test_ai_command_supports_arithmetic_expression() -> None:
     assert data["total"] == 14160
 
 
+def test_ai_command_calculates_each_quantity_with_gst() -> None:
+    response = client.post("/ai/command", json={"command": "5 laptops 30000 each GST 18%"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["base_amount"] == 150000
+    assert data["gst_amount"] == 27000
+    assert data["total"] == 177000
+
+
 def test_routes_debug_endpoint_lists_ai_command() -> None:
     response = client.get("/routes")
 

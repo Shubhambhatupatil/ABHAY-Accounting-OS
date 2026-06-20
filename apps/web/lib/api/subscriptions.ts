@@ -72,8 +72,19 @@ export async function activateSubscriptionPlan(
 ) {
   const user = await requireUser(supabase);
   const planName = mapPlanIdToName(plan);
-  const periodEnd = new Date(Date.now() + (plan === "trial" ? 14 : 30) * 86_400_000).toISOString();
   const periodStart = new Date().toISOString();
+  const current = await getOrCreateSubscription(supabase);
+
+  if (plan === "trial" && current) {
+    if (current.status === "expired" || new Date(current.trialEnd).getTime() < Date.now()) {
+      return current;
+    }
+    if (current.status === "trialing") {
+      return current;
+    }
+  }
+
+  const periodEnd = new Date(Date.now() + (plan === "trial" ? 14 : 30) * 86_400_000).toISOString();
 
   if (razorpayPaymentId) {
     const { error: paymentError } = await supabase.from("payments").insert({
@@ -87,7 +98,6 @@ export async function activateSubscriptionPlan(
     }
   }
 
-  const current = await getOrCreateSubscription(supabase);
   const query = current?.id
     ? supabase
         .from("subscriptions")

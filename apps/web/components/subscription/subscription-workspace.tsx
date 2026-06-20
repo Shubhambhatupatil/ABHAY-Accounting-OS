@@ -37,7 +37,11 @@ export function SubscriptionWorkspace() {
     if (plan === "trial") {
       const next = await activateSubscriptionPlan(supabase, "trial");
       setSubscription(next);
-      setStatus("Free Trial activated for 14 days.");
+      if (next.status === "expired") {
+        setStatus("Your Free Trial has expired. Choose a paid plan to continue.");
+      } else {
+        setStatus(`Free Trial active: ${daysRemaining(next)} days left.`);
+      }
       return;
     }
 

@@ -66,5 +66,14 @@ async function getSupabaseAccessToken() {
   const {
     data: { session }
   } = await supabase.auth.getSession();
-  return session?.access_token ?? null;
+  if (session?.access_token) {
+    return session.access_token;
+  }
+  if (
+    process.env.NEXT_PUBLIC_ALPHA_DEMO_MODE === "true" &&
+    cookieStore.get("abhay_alpha_demo")?.value === "true"
+  ) {
+    return "abhay-local-demo-token";
+  }
+  return null;
 }

@@ -1,4 +1,5 @@
 import ast
+import logging
 import operator
 import re
 from typing import Any
@@ -15,6 +16,7 @@ from app.core.database import get_db
 from app.models.accounting import AiLog, AuditLog, Company
 
 router = APIRouter(prefix="/ai", tags=["ai-command"])
+logger = logging.getLogger(__name__)
 
 
 class AiCommandRequest(BaseModel):
@@ -308,8 +310,9 @@ def persist_ai_command_log_safely(
 ) -> None:
     try:
         persist_ai_command_log(db, payload, response)
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
         db.rollback()
+        logger.warning("ABHAY AI command log persistence failed: %s", exc.__class__.__name__)
 
 
 def persist_ai_command_log(db: Session, payload: AiCommandRequest, response: AiCommandResponse) -> None:

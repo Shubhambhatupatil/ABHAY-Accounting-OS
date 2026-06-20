@@ -127,6 +127,8 @@ create table if not exists subscriptions (
   trial_end timestamptz,
   status text not null default 'trial',
   active boolean not null default true,
+  current_period_start timestamptz,
+  current_period_end timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -138,6 +140,17 @@ alter table subscriptions
 
 alter table subscriptions
   add column if not exists user_id uuid;
+
+alter table subscriptions
+  add column if not exists current_period_start timestamptz;
+
+alter table subscriptions
+  add column if not exists current_period_end timestamptz;
+
+update subscriptions
+  set current_period_start = coalesce(current_period_start, trial_start),
+      current_period_end = coalesce(current_period_end, trial_end)
+  where current_period_start is null or current_period_end is null;
 
 create table if not exists payments (
   id uuid primary key default gen_random_uuid(),
@@ -401,6 +414,14 @@ begin
       with check (public.abhay_user_has_company_access(company_id));
   end if;
 
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'subscriptions' and policyname = 'users can manage own subscriptions') then
+    create policy "users can manage own subscriptions"
+      on subscriptions for all
+      to authenticated
+      using (user_id = auth.uid() or profile_id = auth.uid())
+      with check (user_id = auth.uid() or profile_id = auth.uid());
+  end if;
+
   if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'payments' and policyname = 'company members can read payments') then
     create policy "company members can read payments"
       on payments for select
@@ -414,6 +435,14 @@ begin
       to authenticated
       using (public.abhay_user_has_company_access(company_id))
       with check (public.abhay_user_has_company_access(company_id));
+  end if;
+
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'payments' and policyname = 'users can manage own payments') then
+    create policy "users can manage own payments"
+      on payments for all
+      to authenticated
+      using (user_id = auth.uid() or profile_id = auth.uid())
+      with check (user_id = auth.uid() or profile_id = auth.uid());
   end if;
 
   if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'vouchers' and policyname = 'company members can read vouchers') then

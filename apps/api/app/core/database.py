@@ -65,6 +65,14 @@ def apply_alpha_postgres_compatibility(database_url: str | None = None) -> None:
         """,
         "alter table if exists profiles add column if not exists full_name text",
         "alter table if exists profiles add column if not exists email text",
+        "alter table if exists subscriptions add column if not exists current_period_start timestamptz",
+        "alter table if exists subscriptions add column if not exists current_period_end timestamptz",
+        """
+        update subscriptions
+          set current_period_start = coalesce(current_period_start, trial_start),
+              current_period_end = coalesce(current_period_end, trial_end)
+          where current_period_start is null or current_period_end is null;
+        """,
         "alter table if exists companies add column if not exists legal_name text",
         "alter table if exists companies add column if not exists trade_name text",
         "alter table if exists companies add column if not exists state_code varchar(2)",

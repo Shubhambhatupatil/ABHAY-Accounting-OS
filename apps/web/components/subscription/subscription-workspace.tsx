@@ -11,11 +11,12 @@ import {
 import { SubscriptionStatusStrip, useSubscriptionState } from "@/components/subscription/subscription-gate";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { activateSubscriptionPlan, markSubscriptionPaymentPending } from "@/lib/api/subscriptions";
+import { activateSubscriptionPlan, getOrCreateSubscription, markSubscriptionPaymentPending } from "@/lib/api/subscriptions";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 
 type RazorpayInstance = {
   open: () => void;
+  on?: (event: "payment.failed", callback: (response: unknown) => void) => void;
 };
 
 type RazorpayConstructor = new (options: Record<string, unknown>) => RazorpayInstance;
@@ -62,7 +63,7 @@ export function SubscriptionWorkspace() {
       const orderResponse = await fetch("/api/razorpay/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan })
+        body: JSON.stringify({ plan_name: plan })
       });
 
       if (!orderResponse.ok) {
@@ -72,21 +73,26 @@ export function SubscriptionWorkspace() {
         return;
       }
 
-      const order = (await orderResponse.json()) as { id: string; amount: number; currency: string };
+      const order = (await orderResponse.json()) as { id: string; amount: number; currency: string; plan_name: string };
       const checkout = new window.Razorpay!({
         key: publicEnv.NEXT_PUBLIC_RAZORPAY_KEY_ID,
         amount: order.amount,
         currency: order.currency,
         name: "ABHAY Accounting OS",
-        description: `ABHAY ${plan} subscription`,
+        description: `ABHAY ${order.plan_name} subscription`,
         order_id: order.id,
         theme: { color: "#f97316" },
-        handler: (response: { razorpay_payment_id?: string }) => {
-          void activateSubscriptionPlan(supabase, plan, response.razorpay_payment_id, order.amount).then((next) => {
+        handler: (response: {
+          razorpay_order_id?: string;
+          razorpay_payment_id?: string;
+          razorpay_signature?: string;
+        }) => {
+          void verifyPayment(plan, response).then(async () => {
+            const next = await getOrCreateSubscription(supabase);
             setSubscription(next);
-            setStatus("Payment captured. Subscription activated.");
+            setStatus("Payment verified. Subscription activated.");
           }).catch((error: unknown) => {
-            setStatus(error instanceof Error ? error.message : "Payment captured, but subscription sync failed.");
+            setStatus(error instanceof Error ? error.message : "Payment verification failed. Your plan was not activated.");
           });
         },
         modal: {
@@ -95,6 +101,10 @@ export function SubscriptionWorkspace() {
             setStatus("Payment pending. You can retry checkout anytime.");
           }
         }
+      });
+      checkout.on?.("payment.failed", () => {
+        void markSubscriptionPaymentPending(supabase, plan).then(setSubscription).catch(() => undefined);
+        setStatus("Payment failed. Your plan was not activated.");
       });
       checkout.open();
     } catch (error) {
@@ -188,7 +198,16 @@ export function SubscriptionWorkspace() {
           <div className="glass-card p-5">
             <h2 className="text-base font-semibold text-white">Current Access</h2>
             <p className="mt-3 text-sm leading-6 text-white/60">
-              Status: {subscription?.status ?? "trialing"} · Plan: {subscription?.plan ?? "trial"} · Trial days left: {daysRemaining(subscription)}
+              Current Plan: {subscription?.planName ?? "Free Trial"}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-white/60">
+              Payment Status: {subscription?.status === "active" ? "Paid" : subscription?.status === "payment_pending" ? "Pending" : subscription?.status === "expired" ? "Expired" : "Trial Active"}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-white/60">
+              Renewal Date: {formatDate(subscription?.currentPeriodEnd ?? subscription?.trialEnd)}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-white/60">
+              Trial Days Left: {subscription?.status === "trialing" ? daysRemaining(subscription) : 0}
             </p>
           </div>
           <div className="glass-card p-5">
@@ -223,5 +242,34 @@ function loadRazorpayScript() {
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("Razorpay checkout script could not load."));
     document.body.appendChild(script);
+  });
+}
+
+async function verifyPayment(
+  plan: SubscriptionPlan,
+  response: {
+    razorpay_order_id?: string;
+    razorpay_payment_id?: string;
+    razorpay_signature?: string;
+  }
+) {
+  const verifyResponse = await fetch("/api/razorpay/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan_name: plan, ...response })
+  });
+
+  if (!verifyResponse.ok) {
+    const error = await verifyResponse.json().catch(() => ({ detail: "Payment verification failed." }));
+    throw new Error(typeof error.detail === "string" ? error.detail : "Payment verification failed.");
+  }
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "-";
+  return new Date(value).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
   });
 }

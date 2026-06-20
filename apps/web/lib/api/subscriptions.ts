@@ -33,7 +33,7 @@ export async function getOrCreateSubscription(supabase: AuthCapableSupabase): Pr
 
   const { data: existing, error: selectError } = await supabase
     .from("subscriptions")
-    .select("id,user_id,plan_name,trial_start,trial_end,status,active,created_at")
+    .select("id,user_id,plan_name,trial_start,trial_end,status,active,current_period_start,current_period_end,created_at")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -53,7 +53,7 @@ export async function getOrCreateSubscription(supabase: AuthCapableSupabase): Pr
       .from("subscriptions")
       .update({ status: "expired", active: false })
       .eq("id", existing.id)
-      .select("id,user_id,plan_name,trial_start,trial_end,status,active,created_at")
+      .select("id,user_id,plan_name,trial_start,trial_end,status,active,current_period_start,current_period_end,created_at")
       .single<SubscriptionRow>();
 
     if (updateError) {
@@ -112,7 +112,9 @@ export async function activateSubscriptionPlan(
           status: plan === "trial" ? "trialing" : "active",
           active: true,
           trial_start: plan === "trial" ? periodStart : current.trialStartedAt,
-          trial_end: periodEnd
+          trial_end: periodEnd,
+          current_period_start: periodStart,
+          current_period_end: periodEnd
         })
         .eq("id", current.id)
     : supabase
@@ -122,12 +124,14 @@ export async function activateSubscriptionPlan(
           plan_name: planName,
           trial_start: periodStart,
           trial_end: periodEnd,
+          current_period_start: periodStart,
+          current_period_end: periodEnd,
           status: plan === "trial" ? "trialing" : "active",
           active: true
         });
 
   const { data, error } = await query
-    .select("id,user_id,plan_name,trial_start,trial_end,status,active,created_at")
+    .select("id,user_id,plan_name,trial_start,trial_end,status,active,current_period_start,current_period_end,created_at")
     .single<SubscriptionRow>();
 
   if (error) {
@@ -161,12 +165,14 @@ export async function markSubscriptionPaymentPending(supabase: AuthCapableSupaba
           plan_name: planName,
           trial_start: new Date().toISOString(),
           trial_end: end,
+          current_period_start: new Date().toISOString(),
+          current_period_end: end,
           status: "payment_pending",
           active: false
         });
 
   const { data, error } = await query
-    .select("id,user_id,plan_name,trial_start,trial_end,status,active,created_at")
+    .select("id,user_id,plan_name,trial_start,trial_end,status,active,current_period_start,current_period_end,created_at")
     .single<SubscriptionRow>();
 
   if (error) {
@@ -185,10 +191,12 @@ async function createTrialSubscription(supabase: AuthCapableSupabase, userId: st
       plan_name: "Free Trial",
       trial_start: trialStart.toISOString(),
       trial_end: trialEnd.toISOString(),
+      current_period_start: trialStart.toISOString(),
+      current_period_end: trialEnd.toISOString(),
       status: "trialing",
       active: true
     })
-    .select("id,user_id,plan_name,trial_start,trial_end,status,active,created_at")
+    .select("id,user_id,plan_name,trial_start,trial_end,status,active,current_period_start,current_period_end,created_at")
     .single<SubscriptionRow>();
 
   if (error) {

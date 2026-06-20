@@ -10,6 +10,8 @@ export type SubscriptionState = {
   active: boolean;
   trialStartedAt: string;
   trialEnd: string;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
   invoiceUploadsUsed: number;
   razorpayPaymentId?: string;
 };
@@ -22,6 +24,8 @@ export type SubscriptionRow = {
   trial_end: string;
   status: string;
   active: boolean;
+  current_period_start?: string | null;
+  current_period_end?: string | null;
   created_at: string;
 };
 
@@ -49,7 +53,7 @@ export const subscriptionPlans = [
   {
     id: "business",
     name: "Business",
-    price: "₹2,999",
+    price: "₹2999",
     cadence: "month",
     summary: "For growing teams with approval workflows.",
     invoiceLimit: 500,
@@ -58,7 +62,7 @@ export const subscriptionPlans = [
   {
     id: "pro",
     name: "Pro",
-    price: "₹4,999",
+    price: "₹4999",
     cadence: "month",
     summary: "For CA-led teams and multi-company operators.",
     invoiceLimit: 1500,
@@ -100,9 +104,11 @@ export function mapSubscriptionRow(row: SubscriptionRow): SubscriptionState {
     plan: mapPlanNameToId(row.plan_name),
     planName: row.plan_name,
     status,
-    active: row.active && status !== "expired" && new Date(row.trial_end).getTime() >= Date.now(),
+    active: row.active && status !== "expired" && new Date(row.current_period_end ?? row.trial_end).getTime() >= Date.now(),
     trialStartedAt: row.trial_start,
     trialEnd: row.trial_end,
+    currentPeriodStart: row.current_period_start ?? null,
+    currentPeriodEnd: row.current_period_end ?? null,
     invoiceUploadsUsed: 0
   };
 }
@@ -117,13 +123,15 @@ export function createDemoSubscriptionState(): SubscriptionState {
     active: true,
     trialStartedAt: started.toISOString(),
     trialEnd: ends.toISOString(),
+    currentPeriodStart: started.toISOString(),
+    currentPeriodEnd: ends.toISOString(),
     invoiceUploadsUsed: 0
   };
 }
 
 export function daysRemaining(state: SubscriptionState | null) {
   if (!state) return 0;
-  const end = new Date(state.trialEnd).getTime();
+  const end = new Date(state.currentPeriodEnd ?? state.trialEnd).getTime();
   if (Number.isNaN(end)) return 0;
   const remaining = Math.ceil((end - Date.now()) / 86_400_000);
   return Math.max(0, remaining);

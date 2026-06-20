@@ -1,4 +1,5 @@
 import csv
+import logging
 from decimal import Decimal
 from io import StringIO
 from uuid import UUID
@@ -50,6 +51,7 @@ from app.schemas.accounting import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def user_uuid(user: AuthenticatedUser) -> UUID:
@@ -191,9 +193,10 @@ def list_companies(
             for company in companies:
                 repo.ensure_launch_ai_ledgers(company.id)
     except SQLAlchemyError as exc:
+        logger.warning("Database unavailable while loading companies", exc_info=exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database unavailable while loading companies: {exc.__class__.__name__}",
+            detail="Unable to load companies. Please try again.",
         ) from exc
     return [CompanyResponse.model_validate(company) for company in companies]
 
@@ -216,9 +219,10 @@ def create_first_company(
             payload.state_code,
         )
     except SQLAlchemyError as exc:
+        logger.warning("Database unavailable while creating company", exc_info=exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database unavailable while creating company: {exc.__class__.__name__}",
+            detail="Unable to create company. Please try again.",
         ) from exc
     return CompanyResponse.model_validate(company)
 
@@ -297,9 +301,10 @@ def create_demo_company(
             metadata.get("full_name"),
         )
     except SQLAlchemyError as exc:
+        logger.warning("Database unavailable while creating demo company", exc_info=exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database unavailable while creating demo company: {exc.__class__.__name__}",
+            detail="Unable to create company. Please try again.",
         ) from exc
     return DemoCompanyResponse(
         company_id=result.company_id,

@@ -1,5 +1,43 @@
 create extension if not exists pgcrypto;
 
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'membership_status') then
+    create type membership_status as enum ('invited', 'active', 'suspended', 'removed');
+  end if;
+end $$;
+
+create table if not exists companies (
+  id uuid primary key default gen_random_uuid(),
+  legal_name text,
+  trade_name text,
+  gstin text,
+  state_code text,
+  created_by uuid,
+  created_at timestamptz not null default now()
+);
+
+alter table companies add column if not exists company_name text;
+alter table companies add column if not exists legal_name text;
+alter table companies add column if not exists trade_name text;
+alter table companies add column if not exists gstin text;
+alter table companies add column if not exists industry text;
+alter table companies add column if not exists state text;
+alter table companies add column if not exists state_code text;
+alter table companies add column if not exists financial_year text;
+alter table companies add column if not exists created_by uuid;
+alter table companies add column if not exists created_at timestamptz not null default now();
+
+update companies
+  set legal_name = coalesce(legal_name, company_name, 'ANVRITAI Demo Company'),
+      trade_name = coalesce(trade_name, company_name, legal_name, 'ANVRITAI Demo Company'),
+      company_name = coalesce(company_name, legal_name, trade_name, 'ANVRITAI Demo Company'),
+      state_code = coalesce(state_code, state)
+  where legal_name is null
+     or trade_name is null
+     or company_name is null
+     or state_code is null;
+
 create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text,
@@ -11,6 +49,73 @@ alter table profiles
 
 alter table profiles
   add column if not exists created_at timestamptz not null default now();
+
+alter table profiles
+  add column if not exists full_name text;
+
+create table if not exists roles (
+  id uuid primary key default gen_random_uuid(),
+  code text not null,
+  name text not null,
+  description text not null default ''
+);
+
+insert into roles (id, code, name, description)
+select gen_random_uuid(), 'owner', 'Owner', 'Company owner'
+where not exists (select 1 from roles where code = 'owner');
+insert into roles (id, code, name, description)
+select gen_random_uuid(), 'admin', 'Admin', 'Company admin'
+where not exists (select 1 from roles where code = 'admin');
+insert into roles (id, code, name, description)
+select gen_random_uuid(), 'accountant', 'Accountant', 'Company accountant'
+where not exists (select 1 from roles where code = 'accountant');
+insert into roles (id, code, name, description)
+select gen_random_uuid(), 'auditor', 'Auditor', 'Company auditor'
+where not exists (select 1 from roles where code = 'auditor');
+insert into roles (id, code, name, description)
+select gen_random_uuid(), 'viewer', 'Viewer', 'Read-only viewer'
+where not exists (select 1 from roles where code = 'viewer');
+
+create table if not exists company_members (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references companies(id) on delete cascade,
+  profile_id uuid,
+  user_id uuid,
+  role_id uuid,
+  role text,
+  status membership_status,
+  created_at timestamptz not null default now()
+);
+
+alter table company_members add column if not exists profile_id uuid;
+alter table company_members add column if not exists user_id uuid;
+alter table company_members add column if not exists role_id uuid;
+alter table company_members add column if not exists role text;
+alter table company_members add column if not exists status membership_status;
+alter table company_members add column if not exists created_at timestamptz not null default now();
+
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'company_members'
+      and column_name = 'status'
+      and udt_name <> 'membership_status'
+  ) then
+    alter table company_members
+      alter column status type membership_status
+      using coalesce(status, 'active')::membership_status;
+  end if;
+end $$;
+
+update company_members set profile_id = user_id where profile_id is null and user_id is not null;
+update company_members set user_id = profile_id where user_id is null and profile_id is not null;
+update company_members set status = 'active'::membership_status where status is null;
+update company_members
+  set role_id = (select id from roles where code = 'owner' limit 1),
+      role = coalesce(role, 'Owner')
+  where role_id is null;
 
 create table if not exists subscriptions (
   id uuid primary key default gen_random_uuid(),

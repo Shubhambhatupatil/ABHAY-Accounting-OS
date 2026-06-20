@@ -3,9 +3,15 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+import app.models.accounting  # noqa: F401
+from app.core.database import Base, get_db
 from app.domain.accounting.engine import AccountingValidationError, PostingLine, gst_split, validate_double_entry
 from app.main import app
+from app.core.security import LOCAL_DEMO_TOKEN
 
 
 client = TestClient(app)
@@ -82,3 +88,35 @@ def test_launch_pack_gstr_csv_routes_are_registered() -> None:
     paths = {route["path"] for route in response.json()}
     assert "/companies/{company_id}/reports/gstr1.csv" in paths
     assert "/companies/{company_id}/reports/gstr3b.csv" in paths
+
+
+def test_demo_company_creation_returns_company_id() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def override_db():
+        db = session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        response = client.post(
+            "/demo/company",
+            headers={"Authorization": f"Bearer {LOCAL_DEMO_TOKEN}"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["company_id"]
+    assert body["legal_name"] == "ABHAY Demo Traders"
+    assert "ProgrammingError" not in response.text

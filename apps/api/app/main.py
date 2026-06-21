@@ -13,6 +13,7 @@ from app.api.routes.ai_command import router as ai_command_router
 from app.api.routes.ai_entry import router as ai_entry_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.bank_reconciliation import router as bank_reconciliation_router
+from app.api.routes.document_intelligence import router as document_intelligence_router
 from app.api.routes.financial_intelligence import router as financial_intelligence_router
 from app.api.routes.automation import router as automation_router
 from app.core.config import get_settings
@@ -90,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_entry_router)
     app.include_router(automation_router)
     app.include_router(bank_reconciliation_router)
+    app.include_router(document_intelligence_router)
     app.include_router(financial_intelligence_router)
 
     @app.get("/health", tags=["system"])

@@ -247,6 +247,18 @@ create table if not exists ai_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists document_ai_logs (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references companies(id) on delete cascade,
+  user_id uuid,
+  file_name text not null,
+  document_type text not null,
+  extracted_text text not null default '',
+  extracted_json jsonb not null default '{}'::jsonb,
+  confidence_score numeric(5, 2) not null default 0,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists audit_logs (
   id uuid primary key default gen_random_uuid(),
   company_id uuid references companies(id) on delete cascade,
@@ -282,6 +294,30 @@ alter table accounting_entries
 alter table ai_logs
   add column if not exists company_id uuid references companies(id) on delete cascade;
 
+alter table document_ai_logs
+  add column if not exists company_id uuid references companies(id) on delete cascade;
+
+alter table document_ai_logs
+  add column if not exists user_id uuid;
+
+alter table document_ai_logs
+  add column if not exists file_name text;
+
+alter table document_ai_logs
+  add column if not exists document_type text;
+
+alter table document_ai_logs
+  add column if not exists extracted_text text;
+
+alter table document_ai_logs
+  add column if not exists extracted_json jsonb;
+
+alter table document_ai_logs
+  add column if not exists confidence_score numeric(5, 2);
+
+alter table document_ai_logs
+  add column if not exists created_at timestamptz not null default now();
+
 alter table audit_logs
   add column if not exists company_id uuid references companies(id) on delete cascade;
 
@@ -304,6 +340,9 @@ create index if not exists accounting_entries_invoice_id_idx on accounting_entri
 create index if not exists ai_logs_company_id_idx on ai_logs(company_id);
 create index if not exists ai_logs_profile_id_idx on ai_logs(profile_id);
 create index if not exists ai_logs_user_id_idx on ai_logs(user_id);
+create index if not exists document_ai_logs_company_id_idx on document_ai_logs(company_id);
+create index if not exists document_ai_logs_user_id_idx on document_ai_logs(user_id);
+create index if not exists document_ai_logs_created_at_idx on document_ai_logs(created_at desc);
 create index if not exists audit_logs_company_id_idx on audit_logs(company_id);
 create index if not exists audit_logs_entity_idx on audit_logs(entity_type, entity_id);
 create index if not exists site_visits_created_at_idx on site_visits(created_at desc);
@@ -391,6 +430,7 @@ alter table voucher_lines enable row level security;
 alter table invoices enable row level security;
 alter table accounting_entries enable row level security;
 alter table ai_logs enable row level security;
+alter table document_ai_logs enable row level security;
 alter table audit_logs enable row level security;
 alter table site_visits enable row level security;
 
@@ -518,6 +558,21 @@ begin
       to authenticated
       using (company_id is null or public.abhay_user_has_company_access(company_id))
       with check (company_id is null or public.abhay_user_has_company_access(company_id));
+  end if;
+
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'document_ai_logs' and policyname = 'company members can read document ai logs') then
+    create policy "company members can read document ai logs"
+      on document_ai_logs for select
+      to authenticated
+      using (public.abhay_user_has_company_access(company_id));
+  end if;
+
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'document_ai_logs' and policyname = 'company members can write document ai logs') then
+    create policy "company members can write document ai logs"
+      on document_ai_logs for all
+      to authenticated
+      using (public.abhay_user_has_company_access(company_id))
+      with check (public.abhay_user_has_company_access(company_id));
   end if;
 
   if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'audit_logs' and policyname = 'company members can read audit logs') then

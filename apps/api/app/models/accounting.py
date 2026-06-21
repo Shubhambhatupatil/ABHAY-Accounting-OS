@@ -184,6 +184,20 @@ class AiLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class DocumentAiLog(Base):
+    __tablename__ = "document_ai_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    file_name: Mapped[str] = mapped_column(Text)
+    document_type: Mapped[str] = mapped_column(Text)
+    extracted_text: Mapped[str] = mapped_column(Text)
+    extracted_json: Mapped[dict] = mapped_column(JSON)
+    confidence_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 

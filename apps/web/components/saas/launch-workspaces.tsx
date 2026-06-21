@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   FileSearch,
   FileSpreadsheet,
+  Loader2,
   LockKeyhole,
   ReceiptText,
   Settings,
@@ -27,6 +28,7 @@ import {
 } from "@/components/subscription/subscription-gate";
 import { accountingApi, Company, LedgerScrutiny } from "@/lib/api/accounting";
 import { bankReconciliationApi } from "@/lib/api/bank-reconciliation";
+import { DocumentIntelligenceResult, uploadDocumentForAnalysis } from "@/lib/api/document-intelligence";
 import {
   CompanyMember,
   CompanyRole,
@@ -90,19 +92,74 @@ type AnalyticsSummary = {
 
 export function UploadInvoiceWorkspace() {
   const { subscription } = useSubscriptionState();
-  const [message, setMessage] = useState("Upload text PDFs for Alpha extraction review. Scanned/image OCR is coming soon.");
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const [token, setToken] = useState<string | null>(null);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyId, setCompanyId] = useState("");
+  const [message, setMessage] = useState("Upload a PDF or image for ABHAY Document Intelligence Alpha review.");
+  const [result, setResult] = useState<DocumentIntelligenceResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  function handleUpload(file: File | undefined) {
+  useEffect(() => {
+    let active = true;
+    async function bootstrap() {
+      try {
+        const accessToken = await getAccessToken(supabase);
+        if (!active) return;
+        setToken(accessToken);
+        if (!accessToken) {
+          setMessage("Please login or continue in Alpha Demo Mode before uploading documents.");
+          return;
+        }
+        const rows = await accountingApi.companies(accessToken);
+        if (!active) return;
+        setCompanies(rows);
+        setCompanyId(rows[0]?.id ?? "");
+        setMessage(rows.length ? "Document Intelligence ready. Human approval is required before posting." : "Create or select a company before uploading documents.");
+      } catch {
+        if (active) {
+          setMessage("Unable to load companies. Please retry after checking your session.");
+        }
+      }
+    }
+    void bootstrap();
+    return () => {
+      active = false;
+    };
+  }, [supabase]);
+
+  async function handleUpload(file: File | undefined) {
     if (!file) return;
+    setResult(null);
+    if (!token) {
+      setMessage("Please login again.");
+      return;
+    }
+    if (!companyId) {
+      setMessage("Please select a company first.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setMessage("File too large for Alpha. Upload a document up to 10MB.");
+      return;
+    }
+    if (!["application/pdf", "image/png", "image/jpeg", "image/jpg"].includes(file.type)) {
+      setMessage("Upload a PDF, PNG, JPG, or JPEG document.");
+      return;
+    }
     if (file.type.startsWith("image/")) {
-      setMessage("Image/scanned OCR is coming soon. Use text PDF or one-line entry for now.");
-      return;
+      setMessage("Image/scanned OCR is attempted only when OCR is available. Use text PDF or one-line entry if OCR is unavailable.");
     }
-    if (file.type !== "application/pdf") {
-      setMessage("Only text PDF bills are supported in Alpha. Use one-line AI entry for other formats.");
-      return;
+    setIsAnalyzing(true);
+    try {
+      const analysis = await uploadDocumentForAnalysis(companyId, token, file);
+      setResult(analysis);
+      setMessage(analysis.extracted_text_available ? "Document analysis ready for human review." : "Scanned/image OCR is coming soon. Use text PDF or one-line entry for now.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Document analysis failed.");
+    } finally {
+      setIsAnalyzing(false);
     }
-    setMessage(`${file.name} selected. Text PDF extraction runs through AI Workbench in this Alpha build.`);
   }
 
   return (
@@ -117,24 +174,145 @@ export function UploadInvoiceWorkspace() {
         <section className="grid gap-4 lg:grid-cols-[1fr_360px]">
           <label className="glass-panel flex min-h-72 cursor-pointer flex-col items-center justify-center p-6 text-center transition hover:-translate-y-0.5">
             <UploadCloud className="text-orange-200" size={34} />
-            <h2 className="mt-4 text-xl font-semibold text-white">Drop or select text PDF invoice</h2>
+            <h2 className="mt-4 text-xl font-semibold text-white">Drop or select invoice, bill, statement, GST or ledger document</h2>
             <p className="mt-2 max-w-xl text-sm leading-6 text-white/60">
-              Alpha supports text-based PDFs only. Scanned PDF and image OCR is coming soon, and ABHAY will not fake extraction.
+              Alpha tries text PDF extraction first, then OCR when available. Scanned OCR may be unavailable on some servers, and ABHAY will not fake extraction.
             </p>
-            <input className="sr-only" type="file" accept="application/pdf,image/*" onChange={(event) => handleUpload(event.target.files?.[0])} />
+            <input
+              className="sr-only"
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/jpg"
+              onChange={(event) => void handleUpload(event.target.files?.[0])}
+            />
             <span className="mt-5 rounded-2xl border border-orange-300/25 bg-orange-400/10 px-4 py-2 text-sm font-semibold text-orange-100">
-              Select bill
+              {isAnalyzing ? "Analyzing..." : "Select document"}
             </span>
           </label>
           <div className="space-y-4">
+            <div className="glass-card p-4">
+              <h2 className="text-sm font-semibold text-white">Company</h2>
+              <select className="premium-select mt-3 h-11 w-full" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
+                <option value="">{companies.length ? "Select company" : "No company found"}</option>
+                {companies.map((company) => <option key={company.id} value={company.id}>{company.legal_name}</option>)}
+              </select>
+            </div>
             <InfoCard title="Trial Usage" copy={`${subscription?.invoiceUploadsUsed ?? 0}/10 invoice uploads used in Free Trial.`} />
-            <InfoCard title="Fallback" copy="One-line AI entry remains the fastest working input for handwritten or image bills." />
+            <InfoCard title="Alpha Limits" copy="Max 10MB. PDFs analyze first 20 pages. Posting still requires human approval." />
+            <InfoCard title="Fallback" copy="One-line AI entry remains the fastest working input when OCR is unavailable." />
             <Link className="premium-link w-full" href="/ai-workbench">Open AI Workbench</Link>
           </div>
         </section>
+        {isAnalyzing ? (
+          <div className="glass-card flex items-center gap-2 p-4 text-sm text-orange-100">
+            <Loader2 className="animate-spin" size={18} />
+            ABHAY is reading the document and preparing a review suggestion...
+          </div>
+        ) : null}
+        {result ? <DocumentAnalysisPanel result={result} onAction={setMessage} /> : null}
       </SubscriptionGate>
       <p className="empty-state">{message}</p>
     </PageFrame>
+  );
+}
+
+function DocumentAnalysisPanel({
+  result,
+  onAction
+}: Readonly<{
+  result: DocumentIntelligenceResult;
+  onAction: (message: string) => void;
+}>) {
+  const fields = result.fields;
+  const suggestion = result.accounting_suggestion;
+  const fieldRows = [
+    ["Document Type", result.document_type],
+    ["Vendor", fields.vendor_name ?? "-"],
+    ["Customer", fields.customer_name ?? "-"],
+    ["GSTIN", fields.gstin ?? "-"],
+    ["Invoice Number", fields.invoice_number ?? "-"],
+    ["Invoice Date", fields.invoice_date ?? "-"],
+    ["Subtotal", formatMoney(fields.subtotal)],
+    ["GST Rate", fields.gst_rate ? `${fields.gst_rate}%` : "-"],
+    ["GST Amount", formatMoney(fields.gst_amount)],
+    ["Total Amount", formatMoney(fields.total_amount)]
+  ];
+
+  return (
+    <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+      <article className="glass-panel p-5">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span className="ai-badge mb-2">Document Intelligence Alpha</span>
+            <h2 className="text-lg font-semibold text-white">Extracted Fields</h2>
+            <p className="mt-1 text-sm text-white/60">Draft-only analysis. Human approval is required before posting.</p>
+          </div>
+          <span className="rounded-full border border-[#FFD700]/30 bg-[#FFD700]/10 px-3 py-1 text-xs font-semibold text-[#FFE88A]">
+            Confidence {Math.round(Number(result.confidence_score) * 100)}%
+          </span>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {fieldRows.map(([label, value]) => (
+            <div key={label} className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3 text-sm">
+              <p className="text-xs text-white/45">{label}</p>
+              <p className="mt-1 font-semibold text-white">{value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 rounded-xl border border-[#1F2937] bg-[#0F172A]/80 p-3">
+          <h3 className="text-sm font-semibold text-white">Extracted Text Summary</h3>
+          <p className="mt-2 text-sm leading-6 text-white/60">{result.extracted_text_summary}</p>
+        </div>
+      </article>
+
+      <aside className="space-y-4">
+        <article className="glass-card p-5">
+          <h2 className="text-base font-semibold text-white">Accounting Suggestion</h2>
+          <div className="mt-4 space-y-2 text-sm">
+            <SuggestionRow label="Voucher" value={suggestion.suggested_voucher_type} />
+            <SuggestionRow label="Debit" value={suggestion.debit_ledger} />
+            <SuggestionRow label="Credit" value={suggestion.credit_ledger} />
+            <SuggestionRow label="GST" value={suggestion.gst_treatment} />
+          </div>
+          <p className="mt-4 rounded-xl border border-[#00E5FF]/20 bg-[#00E5FF]/10 p-3 text-sm leading-6 text-[#B9F7FF]">
+            {suggestion.summary}
+          </p>
+        </article>
+        <article className="glass-card p-5">
+          <h2 className="text-base font-semibold text-white">Warnings</h2>
+          <div className="mt-3 space-y-2">
+            {result.warnings.length ? result.warnings.map((warning, index) => (
+              <p key={`${index}-${warning}`} className="rounded-xl border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+                {warning}
+              </p>
+            )) : (
+              <p className="rounded-xl border border-[#14B8A6]/20 bg-[#14B8A6]/10 p-3 text-sm text-[#9FF5EA]">
+                No major warning detected. Please still verify before posting.
+              </p>
+            )}
+          </div>
+        </article>
+        <div className="glass-card grid gap-2 p-4 sm:grid-cols-3 xl:grid-cols-1">
+          <Button type="button" onClick={() => onAction("Draft invoice prepared for review. Final posting requires approval.")}>
+            Create Draft Invoice
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => onAction("Draft voucher prepared for review. Final posting requires approval.")}>
+            Create Draft Voucher
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => onAction("Document suggestion rejected. No accounting entry was posted.")}>
+            Reject
+          </Button>
+        </div>
+      </aside>
+    </section>
+  );
+}
+
+function SuggestionRow({ label, value }: Readonly<{ label: string; value: string }>) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
+      <span className="text-white/45">{label}</span>
+      <span className="text-right font-semibold text-white">{value}</span>
+    </div>
   );
 }
 

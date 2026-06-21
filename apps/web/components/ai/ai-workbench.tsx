@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, CheckCircle2, Loader2, RefreshCw, Send, Upload, XCircle } from "lucide-react";
 import { AiCommandResponse, runAiCommand } from "@/lib/api/ai-command";
@@ -300,9 +301,9 @@ export function AiWorkbench() {
             </form>
 
             <div className="glass-card float-card p-4">
-              <h2 className="mb-3 text-base font-semibold">PDF Bill Reader</h2>
+              <h2 className="mb-3 text-base font-semibold">Document Intelligence</h2>
               <p className="mb-3 text-sm text-muted-foreground">
-                Alpha supports text PDFs only. Image/scanned OCR is coming soon. Use text PDF or one-line entry for now.
+                Upload PDF/Image for ABHAY Document Intelligence. Text PDFs are supported; scanned/image OCR is attempted only when OCR is available.
               </p>
               <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#00E5FF]/25 bg-[#00E5FF]/10 p-4 text-center text-sm text-muted-foreground transition hover:-translate-y-0.5 hover:border-[#FF6B00]/30 hover:bg-[#111827]">
                 <Upload className="mb-2 text-[#00E5FF]" size={22} />
@@ -310,6 +311,9 @@ export function AiWorkbench() {
                 <span className="mt-1 text-xs">OCR is not faked. Use one-line AI entry for calculations now.</span>
                 <input className="hidden" type="file" accept="application/pdf,image/*" onChange={(event) => uploadPdf(event.target.files?.[0] ?? null)} />
               </label>
+              <Link className="premium-link mt-3 w-full" href="/upload-invoice">
+                Open Upload Invoice
+              </Link>
             </div>
           </div>
 

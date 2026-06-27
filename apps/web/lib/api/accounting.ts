@@ -18,6 +18,18 @@ export type DemoCompanyResponse = {
   seeded_bank_transactions: number;
 };
 
+export type ClientDemoWorkspaceResponse = {
+  success: true;
+  mode: "client_demo";
+  company_id: string;
+  company_name: string;
+  user: {
+    name: string;
+    email: string;
+    role: "owner";
+  };
+};
+
 export type CompanyCreate = {
   legal_name: string;
   trade_name?: string | null;
@@ -79,7 +91,15 @@ export type Ledger = {
   is_active: boolean;
 };
 
-export type VoucherType = "receipt" | "payment" | "contra" | "journal" | "purchase" | "sales";
+export type VoucherType =
+  | "receipt"
+  | "payment"
+  | "contra"
+  | "journal"
+  | "purchase"
+  | "sales"
+  | "debit_note"
+  | "credit_note";
 
 export type Voucher = {
   id: string;
@@ -121,12 +141,17 @@ export type DashboardMetrics = {
 };
 
 export type DebugCounts = {
+  ledgers: number;
   vouchers: number;
   voucher_lines: number;
-  invoices: number;
   accounting_entries: number;
+  invoices: number;
+  invoice_items: number;
+  bank_transactions: number;
   audit_logs: number;
   ai_logs: number;
+  document_ai_logs: number;
+  inventory_items: number;
 };
 
 export type TrialBalanceRow = {
@@ -258,6 +283,28 @@ async function api<T>(path: string, options: ApiOptions): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function publicApi<T>(path: string, options: { method?: "GET" | "POST"; body?: unknown } = {}): Promise<T> {
+  const url = `${publicEnv.NEXT_PUBLIC_API_URL}${path}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: options.method ?? "GET",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+  } catch {
+    throw new Error("ABHAY backend is temporarily unavailable.");
+  }
+
+  const data = await response.json().catch(() => ({ detail: "Request failed" }));
+  if (!response.ok) {
+    throw new Error(safeApiErrorMessage(data.detail, "Request could not be completed. Please try again."));
+  }
+  return data as T;
+}
+
 export const accountingApi = {
   companies: (token: string) => api<Company[]>("/companies", { token }),
   createCompany: (token: string, body: CompanyCreate) =>
@@ -284,6 +331,8 @@ export const accountingApi = {
     }),
   createDemoCompany: (token: string) =>
     api<DemoCompanyResponse>("/demo/company", { token, method: "POST" }),
+  clientDemoWorkspace: () =>
+    publicApi<ClientDemoWorkspaceResponse>("/api/demo/client-workspace", { method: "POST" }),
   groups: (companyId: string, token: string) =>
     api<LedgerGroup[]>(`/companies/${companyId}/ledger-groups`, { token }),
   createGroup: (companyId: string, token: string, body: { name: string; account_nature: AccountNature }) =>
@@ -362,5 +411,5 @@ export const accountingApi = {
   gstr3bCsvUrl: (companyId: string) =>
     `/api/reports/gstr3b.csv?company_id=${encodeURIComponent(companyId)}`,
   invoicePdfUrl: (companyId: string, invoiceId: string) =>
-    `${publicEnv.NEXT_PUBLIC_API_URL}/companies/${companyId}/invoices/${invoiceId}/pdf`
+    `/api/invoices/pdf?company_id=${encodeURIComponent(companyId)}&invoice_id=${encodeURIComponent(invoiceId)}`
 };

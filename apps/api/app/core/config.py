@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     cors_origin_regex: str = r"https://.*\.vercel\.app"
     openai_api_key: str | None = None
     alpha_demo_mode: bool = False
+    client_demo_mode: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

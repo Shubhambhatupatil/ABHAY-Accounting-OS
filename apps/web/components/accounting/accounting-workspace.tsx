@@ -29,6 +29,7 @@ import {
   DashboardMetrics,
   DebugCounts,
   GstReport,
+  Invoice,
   Ledger,
   LedgerCategory,
   LedgerGroup,
@@ -38,6 +39,7 @@ import {
 } from "@/lib/api/accounting";
 import { getAccessToken, getLocalDemoToken } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
+import { DetailedReportGrids } from "@/components/reports/detailed-report-grids";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -72,7 +74,16 @@ const categories: LedgerCategory[] = [
   "capital",
   "other"
 ];
-const voucherTypes: VoucherType[] = ["receipt", "payment", "contra", "journal", "purchase", "sales"];
+const voucherTypes: VoucherType[] = [
+  "receipt",
+  "payment",
+  "contra",
+  "journal",
+  "purchase",
+  "sales",
+  "debit_note",
+  "credit_note"
+];
 const financialYears = ["FY 2024-25", "FY 2025-26", "FY 2026-27", "Custom FY"] as const;
 const gstStates = [
   ["27", "Maharashtra"],
@@ -115,7 +126,7 @@ export function AccountingWorkspace({ initialTab = "dashboard" }: Readonly<{ ini
   } | null>(null);
   const [cashFlow, setCashFlow] = useState<{ net_cash_flow: string; operating_cash_flow: string } | null>(null);
   const [gstReport, setGstReport] = useState<GstReport | null>(null);
-  const [invoices, setInvoices] = useState<Array<{ id: string; invoice_number: string; total_amount: string }>>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -151,7 +162,7 @@ export function AccountingWorkspace({ initialTab = "dashboard" }: Readonly<{ ini
     getAccessToken(supabase).then((accessToken) => {
       setToken(accessToken);
       if (!accessToken) {
-        setStatus("Please login or continue in Alpha Demo Mode.");
+        setStatus("Please login or open Client Demo Mode.");
         return;
       }
       loadCompanies(accessToken);
@@ -687,7 +698,15 @@ export function AccountingWorkspace({ initialTab = "dashboard" }: Readonly<{ ini
           />
         ) : null}
         {tab === "reports" ? (
-          <ReportsPanel trialBalance={trialBalance} pnl={pnl} balanceSheet={balanceSheet} cashFlow={cashFlow} />
+          <ReportsPanel
+            ledgers={ledgers}
+            vouchers={vouchers}
+            invoices={invoices}
+            trialBalance={trialBalance}
+            pnl={pnl}
+            balanceSheet={balanceSheet}
+            cashFlow={cashFlow}
+          />
         ) : null}
         {tab === "gst" ? <GstPanel gstReport={gstReport} /> : null}
         {tab === "inventory" ? (
@@ -1024,6 +1043,7 @@ function InvoicesPanel(props: {
   token: string | null;
   onCreate: (payload: unknown) => Promise<unknown> | false | null;
 }) {
+  const [invoiceType, setInvoiceType] = useState<"sales" | "purchase">("sales");
   const [partyLedgerId, setPartyLedgerId] = useState("");
   const [amount, setAmount] = useState("");
   const [gstSupplyType, setGstSupplyType] = useState<"intra_state" | "inter_state">("intra_state");
@@ -1040,7 +1060,7 @@ function InvoicesPanel(props: {
       <form className="glass-card p-4" onSubmit={(event) => {
         event.preventDefault();
         void props.onCreate({
-          invoice_type: "sales",
+          invoice_type: invoiceType,
           invoice_number: invoiceNumber,
           invoice_date: new Date().toISOString().slice(0, 10),
           party_ledger_id: partyLedgerId,
@@ -1048,7 +1068,11 @@ function InvoicesPanel(props: {
           lines: [{ description: "Accounting invoice line", hsn_sac: hsnSac || null, quantity: "1", unit: "NOS", unit_price: amount, gst_rate: gstRate }]
         });
       }}>
-        <h2 className="mb-3 text-base font-semibold">Sales Invoice</h2>
+        <h2 className="mb-3 text-base font-semibold">Sales / Purchase Invoice</h2>
+        <select className="premium-select mb-3 h-11 w-full" value={invoiceType} onChange={(event) => setInvoiceType(event.target.value as "sales" | "purchase")}>
+          <option value="sales">Sales Invoice</option>
+          <option value="purchase">Purchase Invoice</option>
+        </select>
         <select className="premium-select h-11 w-full" value={partyLedgerId} onChange={(event) => setPartyLedgerId(event.target.value)} required>
           <option value="">Party ledger</option>
           {props.ledgers.map((ledger) => <option key={ledger.id} value={ledger.id}>{ledger.name}</option>)}
@@ -1095,13 +1119,26 @@ function InvoicesPanel(props: {
 }
 
 function ReportsPanel(props: {
+  ledgers: Ledger[];
+  vouchers: Voucher[];
+  invoices: Invoice[];
   trialBalance: TrialBalanceRow[];
   pnl: { revenue: string; expenses: string; profit: string } | null;
   balanceSheet: { assets: string; liabilities: string; equity: string; check_difference: string } | null;
-  cashFlow: { net_cash_flow: string; operating_cash_flow: string } | null;
+  cashFlow: { net_cash_flow: string; operating_cash_flow: string; investing_cash_flow?: string; financing_cash_flow?: string } | null;
 }) {
   return (
-    <section className="grid gap-4 xl:grid-cols-3">
+    <section className="space-y-4">
+      <DetailedReportGrids
+        ledgers={props.ledgers}
+        vouchers={props.vouchers}
+        invoices={props.invoices}
+        trialBalance={props.trialBalance}
+        pnl={props.pnl}
+        balanceSheet={props.balanceSheet}
+        cashFlow={props.cashFlow}
+      />
+      <div className="grid gap-4 xl:grid-cols-3">
       <Statement title="Profit & Loss" rows={[["Revenue", props.pnl?.revenue], ["Expenses", props.pnl?.expenses], ["Profit", props.pnl?.profit]]} />
       <Statement title="Balance Sheet" rows={[["Assets", props.balanceSheet?.assets], ["Liabilities", props.balanceSheet?.liabilities], ["Equity", props.balanceSheet?.equity], ["Difference", props.balanceSheet?.check_difference]]} />
       <Statement title="Cash Flow" rows={[["Operating", props.cashFlow?.operating_cash_flow], ["Net Cash Flow", props.cashFlow?.net_cash_flow]]} />
@@ -1113,6 +1150,7 @@ function ReportsPanel(props: {
             <tbody>{props.trialBalance.map((row) => <tr key={row.ledger_id} className="border-t"><td className="py-2">{row.ledger_name}</td><td>{title(row.account_nature)}</td><td>{formatMoney(row.debit)}</td><td>{formatMoney(row.credit)}</td></tr>)}</tbody>
           </table>
         </div>
+      </div>
       </div>
     </section>
   );

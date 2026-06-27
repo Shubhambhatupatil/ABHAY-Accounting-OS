@@ -214,7 +214,7 @@ def ocr_image(file_bytes: bytes) -> tuple[str, str | None]:
 
 
 def classify_document(text: str, file_name: str) -> str:
-    normalized = f"{file_name} {text}".lower()
+    normalized = f"{file_name} {text[:50000]}".lower()
     if any(word in normalized for word in ["bank statement", "ifsc", "withdrawal", "deposit", "closing balance"]):
         return "bank_statement"
     if any(word in normalized for word in ["gstr", "gst return", "3b", "tax period"]):
@@ -229,7 +229,7 @@ def classify_document(text: str, file_name: str) -> str:
 
 
 def parse_document_fields(text: str, document_type: str) -> DocumentExtractedFields:
-    normalized = " ".join(text.split())
+    normalized = " ".join(text[:50000].split())
     subtotal = find_money(normalized, [r"taxable(?: value| amount)?[:\s]+(?:inr|rs\.?|₹)?\s*([0-9,.]+)", r"subtotal[:\s]+(?:inr|rs\.?|₹)?\s*([0-9,.]+)"])
     cgst = find_money(normalized, [r"cgst(?:\s*@?\s*[0-9.]+%)?[:\s]+(?:inr|rs\.?|₹)?\s*([0-9,.]+)"])
     sgst = find_money(normalized, [r"sgst(?:\s*@?\s*[0-9.]+%)?[:\s]+(?:inr|rs\.?|₹)?\s*([0-9,.]+)"])

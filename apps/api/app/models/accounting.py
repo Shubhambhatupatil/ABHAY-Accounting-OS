@@ -289,6 +289,21 @@ class JournalEntry(Base):
     ledger: Mapped[Ledger] = relationship()
 
 
+class VoucherLine(Base):
+    __tablename__ = "voucher_lines"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"))
+    voucher_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("vouchers.id"))
+    ledger_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    ledger_name: Mapped[str | None] = mapped_column(Text)
+    line_number: Mapped[int] = mapped_column(Integer)
+    debit: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    credit: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    narration: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 class VoucherAuditEvent(Base):
     __tablename__ = "voucher_audit_events"
 
@@ -343,6 +358,28 @@ class InvoiceLine(Base):
     sgst_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     igst_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+
+
+class InvoiceItem(Base):
+    __tablename__ = "invoice_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"))
+    invoice_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("invoices.id"))
+    line_number: Mapped[int] = mapped_column(Integer)
+    description: Mapped[str] = mapped_column(Text)
+    hsn_sac: Mapped[str | None] = mapped_column(Text)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit: Mapped[str] = mapped_column(Text)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    gst_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    taxable_value: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    cgst_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    sgst_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    igst_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class GstRate(Base):
@@ -414,6 +451,40 @@ class ReconciliationMatch(Base):
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2))
     matched_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     matched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BankMatch(Base):
+    __tablename__ = "bank_matches"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"))
+    bank_transaction_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    voucher_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    journal_entry_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    status: Mapped[str] = mapped_column(Text)
+    matched_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class InventoryItem(Base):
+    __tablename__ = "inventory_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"))
+    item_name: Mapped[str] = mapped_column(Text)
+    sku: Mapped[str | None] = mapped_column(Text)
+    unit: Mapped[str] = mapped_column(Text)
+    hsn_sac: Mapped[str | None] = mapped_column(Text)
+    opening_stock: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    purchase_stock: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    sales_stock: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    closing_stock: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    rate: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    stock_value: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class AiSuggestionStatus(str, enum.Enum):

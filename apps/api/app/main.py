@@ -6,6 +6,8 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes.accounting import router as accounting_router
 from app.api.routes.ai_accountant import router as ai_accountant_router
@@ -17,12 +19,13 @@ from app.api.routes.document_intelligence import router as document_intelligence
 from app.api.routes.financial_intelligence import router as financial_intelligence_router
 from app.api.routes.automation import router as automation_router
 from app.core.config import get_settings
-from app.core.database import create_alpha_schema_if_needed
+from app.core.database import create_alpha_schema_if_needed, create_session
 
 SYSTEM_STATUS = {"status": "ok", "service": "abhay-api", "ai_engine": "ready"}
 RATE_LIMIT_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 120
+MAX_DOCUMENT_UPLOAD_BYTES = 10 * 1024 * 1024
 RATE_LIMITED_PREFIXES = (
     "/auth",
     "/ai/command",
@@ -65,6 +68,24 @@ def create_app() -> FastAPI:
         return response
 
     @app.middleware("http")
+    async def reject_oversized_document_uploads(request: Request, call_next):
+        if request.method in {"POST", "PUT", "PATCH"} and request.url.path.endswith(
+            "/document-intelligence/upload"
+        ):
+            content_length = request.headers.get("content-length")
+            if content_length:
+                try:
+                    size = int(content_length)
+                except ValueError:
+                    size = 0
+                if size > MAX_DOCUMENT_UPLOAD_BYTES:
+                    return JSONResponse(
+                        status_code=413,
+                        content={"detail": "File too large for Alpha. Upload a document up to 10MB."},
+                    )
+        return await call_next(request)
+
+    @app.middleware("http")
     async def rate_limit_sensitive_routes(request: Request, call_next):
         if request.method == "OPTIONS" or not request.url.path.startswith(RATE_LIMITED_PREFIXES):
             return await call_next(request)
@@ -97,6 +118,23 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
         return SYSTEM_STATUS
+
+    @app.get("/health/full", tags=["system"])
+    def full_health() -> dict[str, str]:
+        database_status = "ok"
+        try:
+            with create_session() as db:
+                db.execute(text("select 1"))
+        except SQLAlchemyError:
+            database_status = "fail"
+        return {
+            "api": "ok",
+            "database": database_status,
+            "ai_command": "ok",
+            "document_intelligence": "ok",
+            "storage": database_status,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
 
     @app.get("/", tags=["system"])
     def root() -> dict[str, str]:

@@ -82,6 +82,11 @@ async def upload_pdf_entry(
         pdf_bytes = base64.b64decode(payload.file_base64, validate=True)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid base64 PDF content.") from exc
+    if len(pdf_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File too large for Alpha. Upload a document up to 10MB.",
+        )
 
     extracted_text = extract_text_from_pdf_bytes(pdf_bytes)
     invoice_fields = extract_invoice_fields(extracted_text)

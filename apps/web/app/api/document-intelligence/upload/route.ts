@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { safeApiErrorMessage } from "@/lib/api/safe-error";
 
 const fallbackApiUrl = "https://abhay-api-x027.onrender.com";
+const maxUploadBytes = 10 * 1024 * 1024;
 
 function apiBaseUrl() {
   return (process.env.ABHAY_API_URL || process.env.NEXT_PUBLIC_API_URL || fallbackApiUrl).replace(/\/$/, "");
@@ -18,7 +19,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ detail: "Please login again." }, { status: 401 });
   }
 
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (contentLength > maxUploadBytes) {
+    return NextResponse.json({ detail: "File too large for Alpha. Upload a document up to 10MB." }, { status: 413 });
+  }
+
   const fileBytes = await request.arrayBuffer();
+  if (fileBytes.byteLength > maxUploadBytes) {
+    return NextResponse.json({ detail: "File too large for Alpha. Upload a document up to 10MB." }, { status: 413 });
+  }
   const contentType = request.headers.get("content-type") || "application/octet-stream";
   const fileName = request.headers.get("x-file-name") || "uploaded-document";
 

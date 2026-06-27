@@ -95,7 +95,7 @@ export function AiWorkbench() {
         if (!accessToken) {
           setCompanies([]);
           setCompanyId("");
-          setStatus("Please login or continue in Alpha Demo Mode.");
+          setStatus("Please login or open Client Demo Mode.");
           setStatusTone("error");
           return;
         }

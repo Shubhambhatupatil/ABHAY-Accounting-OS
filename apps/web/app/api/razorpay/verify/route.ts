@@ -47,6 +47,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ detail: "Payment verification failed. Please retry checkout." }, { status: 400 });
   }
 
+  const { data: existingPayment, error: duplicateCheckError } = await supabase
+    .from("payments")
+    .select("id,status")
+    .eq("razorpay_payment_id", paymentId)
+    .maybeSingle<{ id: string; status: string }>();
+  if (duplicateCheckError) {
+    if (process.env.NODE_ENV === "development") {
+      console.warn("ABHAY duplicate payment check failed", duplicateCheckError);
+    }
+    return NextResponse.json({ detail: "Payment verification is temporarily unavailable." }, { status: 503 });
+  }
+  if (existingPayment) {
+    return NextResponse.json({ detail: "This payment has already been processed." }, { status: 409 });
+  }
+
   const now = new Date();
   const periodEnd = new Date(now.getTime() + 30 * 86_400_000);
 

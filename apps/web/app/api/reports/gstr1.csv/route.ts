@@ -74,8 +74,11 @@ async function getSupabaseAccessToken() {
     return session.access_token;
   }
   if (
-    process.env.NEXT_PUBLIC_ALPHA_DEMO_MODE === "true" &&
-    cookieStore.get("abhay_alpha_demo")?.value === "true"
+    cookieStore.get("abhay_client_demo")?.value === "true" ||
+    (
+      process.env.NEXT_PUBLIC_ALPHA_DEMO_MODE === "true" &&
+      cookieStore.get("abhay_alpha_demo")?.value === "true"
+    )
   ) {
     return "abhay-local-demo-token";
   }

@@ -3,17 +3,19 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "apps/web"
+    "apps/web",
+    "apps/ui"
   ],
   "scripts": {
     "dev": "npm --workspace apps/web run dev",
     "build": "npm --workspace apps/web run build",
-    "start": "npm --workspace apps/web run start",
-    "lint": "npm --workspace apps/web run lint",
-    "test": "npm --workspace apps/web run test"
-  },
-  "devDependencies": {
-    "@next/swc-wasm-nodejs": "^15.5.19",
-    "next": "^15.5.19"
+    "preview": "npm --workspace apps/web run start",
+    "web:dev": "npm --workspace apps/web run dev",
+    "web:build": "npm --workspace apps/web run build",
+    "web:lint": "npm --workspace apps/web run lint",
+    "web:test": "npm --workspace apps/web run test",
+    "ui:dev": "npm --workspace apps/ui run dev",
+    "ui:build": "npm --workspace apps/ui run build",
+    "ui:preview": "npm --workspace apps/ui run preview"
   }
 }

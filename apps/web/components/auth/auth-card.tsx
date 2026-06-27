@@ -6,16 +6,17 @@ import { FormEvent, useEffect, useState } from "react";
 import { Loader2, LogIn, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { accountingApi } from "@/lib/api/accounting";
 import { writeClientAuditLog } from "@/lib/api/audit";
 import { verifyApiSession } from "@/lib/api/auth";
-import { isAlphaDemoModeEnabled, startLocalDemoSession } from "@/lib/auth/demo-auth";
+import { isAlphaDemoModeEnabled, startClientDemoSession } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 import { getAuthCallbackUrl } from "@/lib/config";
 
 type AuthMode = "login" | "signup";
 const AUTH_NOTICE_KEY = "abhay_auth_notice";
 export const SIGNUP_FIELD_LABELS = ["Full Name", "Business Name", "Email", "Password", "Confirm Password"] as const;
-export const AUTH_ACTION_LABELS = ["Login", "Create account", "Continue in Alpha Demo Mode"] as const;
+export const AUTH_ACTION_LABELS = ["Login", "Create account", "Client Demo Mode"] as const;
 
 export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
   const router = useRouter();
@@ -28,12 +29,10 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [canUseLocalDemo, setCanUseLocalDemo] = useState(false);
   const isSignup = mode === "signup";
   const alphaDemoMode = isAlphaDemoModeEnabled();
 
   useEffect(() => {
-    setCanUseLocalDemo(alphaDemoMode);
     const notice = window.sessionStorage.getItem(AUTH_NOTICE_KEY);
     if (notice) {
       setSuccess(notice);
@@ -74,7 +73,7 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
           setSuccess("Check your email to confirm your ABHAY account.");
           return;
         }
-        await verifyBackendSessionIfAvailable(accessToken);
+        verifyBackendSessionInBackground(accessToken);
         setSuccess("Account created. Opening company onboarding...");
         router.push("/settings");
         router.refresh();
@@ -87,8 +86,12 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
       }
       const accessToken = result.data.session?.access_token;
       if (accessToken) {
-        await verifyBackendSessionIfAvailable(accessToken);
-        await writeClientAuditLog(supabase, "auth.login", "auth", { email: normalizedEmail });
+        verifyBackendSessionInBackground(accessToken);
+        writeClientAuditLog(supabase, "auth.login", "auth", { email: normalizedEmail }).catch((auditError: unknown) => {
+          if (process.env.NODE_ENV === "development") {
+            console.warn("ABHAY login audit unavailable", auditError);
+          }
+        });
         const redirectPath = await getPostLoginPath();
         setSuccess(redirectPath === "/dashboard" ? "Login successful. Opening dashboard..." : "Login successful. Opening company setup...");
         router.push(redirectPath);
@@ -104,20 +107,24 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
     }
   }
 
-  function continueInDemoMode() {
+  async function continueInClientDemoMode() {
     if (isSubmitting) return;
     setError(null);
     setSuccess(null);
-    if (!alphaDemoMode) {
-      setError("Alpha Demo Mode is disabled in this environment.");
-      return;
-    }
     setIsSubmitting(true);
-    startLocalDemoSession();
-    setSuccess("Alpha Demo Mode active. Opening dashboard...");
-    router.push("/dashboard");
-    router.refresh();
-    window.setTimeout(() => setIsSubmitting(false), 750);
+    try {
+      const demo = await accountingApi.clientDemoWorkspace();
+      startClientDemoSession();
+      window.localStorage.setItem("abhay.lastCompanyId", demo.company_id);
+      setSuccess("Client Demo Workspace ready. Opening dashboard...");
+      router.push("/dashboard");
+      router.refresh();
+    } catch (caught) {
+      console.error("ABHAY client demo setup error", caught);
+      setError("Client Demo Workspace could not be prepared. Please retry.");
+    } finally {
+      window.setTimeout(() => setIsSubmitting(false), 750);
+    }
   }
 
   async function resetPassword() {
@@ -178,7 +185,7 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {isSignup
             ? "Create your Alpha account. Email confirmation may be required by Supabase."
-            : "Login with email/password, create an account, or continue in Alpha Demo Mode."}
+            : "Login with email/password, create an account, or open the Client Demo Workspace."}
         </p>
       </div>
       <div className="space-y-4">
@@ -227,7 +234,7 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
       {success ? <p className="mt-4 rounded-xl border border-emerald-300/30 bg-emerald-400/10 p-3 text-sm text-emerald-200">{success}</p> : null}
       <Button type="submit" className="mt-5 w-full" disabled={isSubmitting}>
         {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : isSignup ? <UserPlus size={18} /> : <LogIn size={18} />}
-        {isSignup ? "Create account" : "Login"}
+        {isSubmitting ? (isSignup ? "Creating your ABHAY account..." : "Signing you in...") : isSignup ? "Create account" : "Login"}
       </Button>
       {!isSignup ? (
         <Link
@@ -237,17 +244,12 @@ export function AuthCard({ mode }: Readonly<{ mode: AuthMode }>) {
           Create account
         </Link>
       ) : null}
-      <Button type="button" className="mt-3 w-full" variant="secondary" disabled={isSubmitting || !canUseLocalDemo} onClick={continueInDemoMode}>
-        Continue in Alpha Demo Mode
+      <Button type="button" className="mt-3 w-full" variant="secondary" disabled={isSubmitting} onClick={() => void continueInClientDemoMode()}>
+        Client Demo Mode
       </Button>
-      {!canUseLocalDemo ? (
+      {alphaDemoMode && process.env.NODE_ENV === "development" ? (
         <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-          Alpha Demo Mode is disabled in this environment.
-        </p>
-      ) : null}
-      {alphaDemoMode ? (
-        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-          For Alpha testing, use Alpha Demo Mode. Production login will be hardened before paid launch.
+          Development label: Client Demo Mode compatibility is enabled.
         </p>
       ) : null}
       {!isSignup ? (
@@ -299,12 +301,12 @@ function validateAuthForm(email: string, password: string, confirmPassword?: str
   }
 }
 
-async function verifyBackendSessionIfAvailable(accessToken: string) {
-  try {
-    await verifyApiSession(accessToken);
-  } catch (error) {
-    console.warn("ABHAY backend verification unavailable", error);
-  }
+function verifyBackendSessionInBackground(accessToken: string) {
+  verifyApiSession(accessToken).catch((error: unknown) => {
+    if (process.env.NODE_ENV === "development") {
+      console.warn("ABHAY backend verification unavailable", error);
+    }
+  });
 }
 
 async function getPostLoginPath() {
@@ -331,7 +333,7 @@ function formatAuthError(caught: unknown, mode: AuthMode) {
   const message = caught instanceof Error ? caught.message : "Authentication failed.";
   const normalized = message.toLowerCase();
   if (normalized.includes("rate limit") || normalized.includes("too many") || normalized.includes("email rate limit")) {
-    return "Email service is rate limited. Please wait or use Alpha Demo Mode.";
+    return "Email service is rate limited. Please wait or use Client Demo Mode.";
   }
   if (
     normalized.includes("email signup") ||
@@ -361,33 +363,33 @@ function formatAuthError(caught: unknown, mode: AuthMode) {
     return "Email or password is incorrect, or your email is not confirmed yet.";
   }
   if (normalized.includes("invalid login") || normalized.includes("invalid credentials") || normalized.includes("email not confirmed")) {
-    return "Account created. Please confirm your email, or continue in Alpha Demo Mode for now.";
+    return "Account created. Please confirm your email, or continue in Client Demo Mode for now.";
   }
   if (normalized.includes("password")) {
     return "Invalid password. Use at least 8 characters.";
   }
   return mode === "login"
-    ? "Login failed. Check password, email confirmation, or use Alpha Demo Mode."
-    : "Signup failed. Try login if this email already exists, or use Alpha Demo Mode.";
+    ? "Login failed. Check password, email confirmation, or use Client Demo Mode."
+    : "Signup failed. Try login if this email already exists, or use Client Demo Mode.";
 }
 
 function formatResendConfirmationError(caught: unknown) {
   const message = caught instanceof Error ? caught.message : "Confirmation email could not be sent.";
   const normalized = message.toLowerCase();
   if (normalized.includes("rate limit") || normalized.includes("too many") || normalized.includes("email rate limit")) {
-    return "Email service is rate limited. Please wait or use Alpha Demo Mode.";
+    return "Email service is rate limited. Please wait or use Client Demo Mode.";
   }
   if (normalized.includes("invalid email")) {
     return "Enter a valid email address.";
   }
-  return "Confirmation email could not be sent. Check the email address or try Alpha Demo Mode.";
+  return "Confirmation email could not be sent. Check the email address or try Client Demo Mode.";
 }
 
 function formatPasswordResetError(caught: unknown) {
   const message = caught instanceof Error ? caught.message : "Password reset failed.";
   const normalized = message.toLowerCase();
   if (normalized.includes("rate limit") || normalized.includes("smtp") || normalized.includes("email")) {
-    return "Password reset email is temporarily unavailable. Use Alpha Demo Mode or contact ANVRITAI.";
+    return "Password reset email is temporarily unavailable. Use Client Demo Mode or contact ANVRITAI.";
   }
-  return "Password reset email is temporarily unavailable. Use Alpha Demo Mode or contact ANVRITAI.";
+  return "Password reset email is temporarily unavailable. Use Client Demo Mode or contact ANVRITAI.";
 }

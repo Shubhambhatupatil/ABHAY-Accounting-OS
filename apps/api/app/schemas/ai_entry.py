@@ -18,7 +18,7 @@ class AiEntryTextRequest(BaseModel):
 
 class AiEntryPdfRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=180)
-    file_base64: str = Field(min_length=10)
+    file_base64: str = Field(min_length=10, max_length=14_000_000)
     transaction_date: date | None = None
     language: str = "auto"
 

@@ -6,6 +6,8 @@ export const LOCAL_DEMO_TOKEN = "abhay-local-demo-token";
 export const LOCAL_DEMO_STORAGE_KEY = "abhay_demo_token";
 export const ALPHA_DEMO_MODE_STORAGE_KEY = "abhay_alpha_demo";
 export const ALPHA_DEMO_MODE_COOKIE = "abhay_alpha_demo";
+export const CLIENT_DEMO_MODE_STORAGE_KEY = "abhay_client_demo";
+export const CLIENT_DEMO_MODE_COOKIE = "abhay_client_demo";
 
 const LEGACY_LOCAL_DEMO_STORAGE_KEY = "abhay.localDemoToken";
 const LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY = "abhay.alphaDemoMode";
@@ -59,6 +61,16 @@ export function startLocalDemoSession() {
   return LOCAL_DEMO_TOKEN;
 }
 
+export function startClientDemoSession() {
+  window.localStorage.setItem(CLIENT_DEMO_MODE_STORAGE_KEY, "true");
+  window.localStorage.setItem(LOCAL_DEMO_STORAGE_KEY, LOCAL_DEMO_TOKEN);
+  document.cookie = `${CLIENT_DEMO_MODE_COOKIE}=true; path=/; max-age=1209600; samesite=lax`;
+  document.cookie = `${ALPHA_DEMO_MODE_COOKIE}=true; path=/; max-age=1209600; samesite=lax`;
+  window.localStorage.removeItem(LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_LOCAL_DEMO_STORAGE_KEY);
+  return LOCAL_DEMO_TOKEN;
+}
+
 export function ensureLocalDemoSession() {
   if (!isAlphaDemoFallbackAllowed()) return null;
   return startLocalDemoSession();
@@ -73,17 +85,25 @@ export function hasAlphaDemoModeFlag() {
   if (typeof window === "undefined") return false;
   return (
     window.localStorage.getItem(ALPHA_DEMO_MODE_STORAGE_KEY) === "true" ||
+    window.localStorage.getItem(CLIENT_DEMO_MODE_STORAGE_KEY) === "true" ||
     window.localStorage.getItem(LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY) === "true"
   );
+}
+
+export function hasClientDemoModeFlag() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(CLIENT_DEMO_MODE_STORAGE_KEY) === "true";
 }
 
 export function clearLocalDemoSession() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(ALPHA_DEMO_MODE_STORAGE_KEY);
+  window.localStorage.removeItem(CLIENT_DEMO_MODE_STORAGE_KEY);
   window.localStorage.removeItem(LOCAL_DEMO_STORAGE_KEY);
   window.localStorage.removeItem(LEGACY_ALPHA_DEMO_MODE_STORAGE_KEY);
   window.localStorage.removeItem(LEGACY_LOCAL_DEMO_STORAGE_KEY);
   document.cookie = `${ALPHA_DEMO_MODE_COOKIE}=; path=/; max-age=0; samesite=lax`;
+  document.cookie = `${CLIENT_DEMO_MODE_COOKIE}=; path=/; max-age=0; samesite=lax`;
 }
 
 export function tokenSourceFor(token: string | null | undefined): "supabase" | "demo" | "missing" {
@@ -108,8 +128,11 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 
 export async function getAccessToken(supabase: SessionCapableSupabase) {
   try {
+    if (hasClientDemoModeFlag()) {
+      return startClientDemoSession();
+    }
     if (getLocalDemoToken() === LOCAL_DEMO_TOKEN) {
-      return startLocalDemoSession();
+      return hasAlphaDemoModeFlag() ? startLocalDemoSession() : startClientDemoSession();
     }
     if (hasAlphaDemoModeFlag()) {
       return startLocalDemoSession();

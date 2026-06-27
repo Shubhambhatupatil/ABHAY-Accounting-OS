@@ -27,8 +27,8 @@ import {
   clearLocalDemoSession,
   getAccessToken,
   getLocalDemoToken,
-  isAlphaDemoModeEnabled,
-  startLocalDemoSession
+  hasClientDemoModeFlag,
+  startClientDemoSession,
 } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 import { Button } from "@/components/ui/button";
@@ -85,8 +85,8 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
   const [status, setStatus] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "missing">("checking");
-  const alphaDemoMode = isAlphaDemoModeEnabled();
   const isDemoSession = Boolean(getLocalDemoToken());
+  const isClientDemoSession = hasClientDemoModeFlag();
 
   useEffect(() => {
     let active = true;
@@ -149,35 +149,49 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
     }
   }
 
-  function continueInAlphaDemoMode() {
-    startLocalDemoSession();
-    setAuthStatus("authenticated");
-    setStatus("Alpha Demo Mode active.");
-    router.push("/dashboard");
-    router.refresh();
+  async function continueInClientDemoMode() {
+    setIsBusy(true);
+    setStatus("");
+    try {
+      const demo = await accountingApi.clientDemoWorkspace();
+      startClientDemoSession();
+      window.localStorage.setItem(LAST_COMPANY_KEY, demo.company_id);
+      setAuthStatus("authenticated");
+      setStatus("Client Demo Workspace ready.");
+      router.push("/dashboard");
+      router.refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Client Demo Workspace could not be prepared.");
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   if (authStatus !== "authenticated") {
     return (
       <main className="abhay-shell-bg flex min-h-screen items-center justify-center p-4">
         <section className="glass-panel max-w-md p-6 text-center">
-          <span className="ai-badge mb-4">ABHAY Alpha v0.1 Auth Stable</span>
-          <h1 className="text-2xl font-semibold">Please login or continue in Alpha Demo Mode</h1>
+          <span className="ai-badge mb-4">ABHAY Client Demo</span>
+          <h1 className="text-2xl font-semibold">Please login or open Client Demo Mode</h1>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             {authStatus === "checking"
               ? "Checking your secure session..."
-              : "For Alpha testing, use Alpha Demo Mode. Production login will be hardened before paid launch."}
+              : "Client Demo Mode opens a clearly labelled sample workspace without email confirmation."}
           </p>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <Button type="button" variant="secondary" onClick={() => router.push("/login")}>
               <LogIn size={17} />
               Login
             </Button>
-            <Button type="button" onClick={continueInAlphaDemoMode}>
+            <Button type="button" onClick={() => void continueInClientDemoMode()} disabled={isBusy}>
               <Sparkles size={17} />
-              Alpha Demo Mode
+              Client Demo Mode
             </Button>
           </div>
+          {process.env.NODE_ENV === "development" ? (
+            <p className="mt-3 text-xs text-muted-foreground">Dev: client demo token fallback enabled for local QA.</p>
+          ) : null}
+          {status ? <p className="mt-3 text-sm text-muted-foreground">{status}</p> : null}
           <Link className="mt-4 inline-flex items-center justify-center gap-2 text-sm font-semibold text-primary" href="/signup">
             <UserPlus size={16} />
             Create account
@@ -222,9 +236,13 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
             </Button>
           </div>
           <span className="ai-badge mb-4 w-fit shrink-0 border-[#FFD700]/25 bg-[#FFD700]/10 text-[#FFD700]">AI Accounting Alpha</span>
-          {alphaDemoMode || isDemoSession ? (
+          {isClientDemoSession ? (
             <p className="mb-4 shrink-0 rounded-2xl border border-[#FFD700]/25 bg-[#FFD700]/10 px-3 py-2 text-xs font-semibold text-[#FFE88A]">
-              Alpha Demo Mode {isDemoSession ? "active" : "available"}
+              Client Demo Workspace
+            </p>
+          ) : isDemoSession && process.env.NODE_ENV === "development" ? (
+            <p className="mb-4 shrink-0 rounded-2xl border border-[#FFD700]/25 bg-[#FFD700]/10 px-3 py-2 text-xs font-semibold text-[#FFE88A]">
+              Client Demo token active
             </p>
           ) : null}
           <nav className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pr-1">
@@ -245,9 +263,9 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
             ))}
           </nav>
           <div className="mt-4 shrink-0 rounded-2xl border border-[#FFD700]/20 bg-gradient-to-br from-[#FFD700]/10 via-[#FF6B00]/10 to-[#050816] p-3 shadow-inner">
-            <p className="text-sm font-semibold text-white">Demo Mode</p>
+            <p className="text-sm font-semibold text-white">{isClientDemoSession ? "Client Demo Workspace" : "Demo Mode"}</p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              Seed a complete demo company with ledgers, vouchers, invoices, GST and bank data.
+              Seed a clearly labelled sample company with ledgers, vouchers, invoices, GST and bank data.
             </p>
             <Button className="mt-3 w-full border border-[#FFD700]/30 bg-[#FFD700]/15 text-[#FFE88A] shadow-[0_0_28px_rgba(255,215,0,0.12)] hover:bg-[#FFD700]/20" type="button" onClick={createDemoCompany} disabled={isBusy}>
               <Sparkles size={17} />

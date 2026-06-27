@@ -26,8 +26,9 @@ import {
   SubscriptionStatusStrip,
   useSubscriptionState
 } from "@/components/subscription/subscription-gate";
-import { accountingApi, Company, LedgerScrutiny } from "@/lib/api/accounting";
+import { accountingApi, Company, DebugCounts, Invoice, Ledger, LedgerScrutiny, TrialBalanceRow, Voucher } from "@/lib/api/accounting";
 import { bankReconciliationApi } from "@/lib/api/bank-reconciliation";
+import { DetailedReportGrids } from "@/components/reports/detailed-report-grids";
 import { DocumentIntelligenceResult, uploadDocumentForAnalysis } from "@/lib/api/document-intelligence";
 import {
   CompanyMember,
@@ -39,7 +40,7 @@ import {
   updateCompanyMemberRole,
   WorkspaceCompany
 } from "@/lib/api/company-workspace";
-import { getAccessToken } from "@/lib/auth/demo-auth";
+import { getAccessToken, hasClientDemoModeFlag } from "@/lib/auth/demo-auth";
 import { createSupabaseBrowserClient } from "@/lib/auth/supabase-browser";
 
 const gstStates = [
@@ -98,7 +99,9 @@ export function UploadInvoiceWorkspace() {
   const [companyId, setCompanyId] = useState("");
   const [message, setMessage] = useState("Upload a PDF or image for ABHAY Document Intelligence Alpha review.");
   const [result, setResult] = useState<DocumentIntelligenceResult | null>(null);
+  const [debugCounts, setDebugCounts] = useState<DebugCounts | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isDrafting, setIsDrafting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -108,13 +111,24 @@ export function UploadInvoiceWorkspace() {
         if (!active) return;
         setToken(accessToken);
         if (!accessToken) {
-          setMessage("Please login or continue in Alpha Demo Mode before uploading documents.");
+          setMessage("Please login or open Client Demo Mode before uploading documents.");
           return;
         }
         const rows = await accountingApi.companies(accessToken);
         if (!active) return;
         setCompanies(rows);
         setCompanyId(rows[0]?.id ?? "");
+        if (rows[0]?.id) {
+          accountingApi.debugCounts(rows[0].id, accessToken)
+            .then((counts) => {
+              if (active) setDebugCounts(counts);
+            })
+            .catch((error: unknown) => {
+              if (process.env.NODE_ENV === "development") {
+                console.warn("ABHAY debug counts unavailable", error);
+              }
+            });
+        }
         setMessage(rows.length ? "Document Intelligence ready. Human approval is required before posting." : "Create or select a company before uploading documents.");
       } catch {
         if (active) {
@@ -156,9 +170,116 @@ export function UploadInvoiceWorkspace() {
       setResult(analysis);
       setMessage(analysis.extracted_text_available ? "Document analysis ready for human review." : "Scanned/image OCR is coming soon. Use text PDF or one-line entry for now.");
     } catch (error) {
+      if (hasClientDemoModeFlag()) {
+        setResult(sampleClientDemoDocumentAnalysis(file.name));
+        setMessage("Real OCR was unavailable, so Client Demo Workspace is showing a clearly labelled sample extracted invoice.");
+        return;
+      }
       setMessage(error instanceof Error ? error.message : "Document analysis failed.");
     } finally {
       setIsAnalyzing(false);
+    }
+  }
+
+  async function refreshDebugCounts(selectedCompanyId = companyId, accessToken = token) {
+    if (!selectedCompanyId || !accessToken) return;
+    try {
+      setDebugCounts(await accountingApi.debugCounts(selectedCompanyId, accessToken));
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("ABHAY debug counts unavailable", error);
+      }
+    }
+  }
+
+  async function createDraftInvoiceFromDocument(analysis: DocumentIntelligenceResult) {
+    if (!token) {
+      setMessage("Please login again.");
+      return;
+    }
+    if (!companyId) {
+      setMessage("Please select a company first.");
+      return;
+    }
+    setIsDrafting(true);
+    try {
+      const ledgers = await ensureDocumentLedgers(companyId, token);
+      const fields = analysis.fields;
+      const subtotal = numericAmount(fields.subtotal ?? fields.total_amount);
+      const gstRate = numericAmount(fields.gst_rate);
+      const invoice = await accountingApi.createInvoice(companyId, token, {
+        invoice_type: "purchase",
+        invoice_number: fields.invoice_number || `DOC-${Date.now()}`,
+        invoice_date: normalizedDate(fields.invoice_date),
+        due_date: null,
+        party_ledger_id: ledgers.creditor.id,
+        gst_supply_type: "intra_state",
+        notes: `Document Intelligence draft from ${analysis.file_name}. Human approved from upload review.`,
+        lines: [
+          {
+            description: fields.vendor_name ? `Bill from ${fields.vendor_name}` : "Document Intelligence draft line",
+            hsn_sac: null,
+            quantity: "1",
+            unit: "NOS",
+            unit_price: String(subtotal > 0 ? subtotal : numericAmount(fields.total_amount)),
+            discount_amount: "0",
+            gst_rate: String(gstRate > 0 ? gstRate : 0)
+          }
+        ]
+      });
+      await refreshDebugCounts();
+      setMessage(`Invoice created successfully: ${invoice.invoice_number}. Review before using for final books.`);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("ABHAY document draft invoice failed", error);
+      }
+      setMessage(error instanceof Error ? error.message : "Draft invoice could not be created.");
+    } finally {
+      setIsDrafting(false);
+    }
+  }
+
+  async function createDraftVoucherFromDocument(analysis: DocumentIntelligenceResult) {
+    if (!token) {
+      setMessage("Please login again.");
+      return;
+    }
+    if (!companyId) {
+      setMessage("Please select a company first.");
+      return;
+    }
+    setIsDrafting(true);
+    try {
+      const ledgers = await ensureDocumentLedgers(companyId, token);
+      const fields = analysis.fields;
+      const subtotal = numericAmount(fields.subtotal ?? fields.total_amount);
+      const gstAmount = numericAmount(fields.gst_amount);
+      const total = numericAmount(fields.total_amount) || subtotal + gstAmount;
+      const lines = gstAmount > 0
+        ? [
+            { ledger_id: ledgers.purchase.id, debit: String(subtotal), credit: "0", narration: "Document Intelligence purchase/expense base" },
+            { ledger_id: ledgers.inputGst.id, debit: String(gstAmount), credit: "0", narration: "Document Intelligence GST input" },
+            { ledger_id: ledgers.creditor.id, debit: "0", credit: String(total), narration: "Document Intelligence payable" }
+          ]
+        : [
+            { ledger_id: ledgers.expense.id, debit: String(total), credit: "0", narration: "Document Intelligence expense" },
+            { ledger_id: ledgers.cash.id, debit: "0", credit: String(total), narration: "Document Intelligence cash/bank payment" }
+          ];
+      const voucher = await accountingApi.createVoucher(companyId, token, {
+        voucher_type: gstAmount > 0 ? "purchase" : "payment",
+        voucher_date: normalizedDate(fields.invoice_date),
+        narration: `Document Intelligence draft from ${analysis.file_name}. Human approved from upload review.`,
+        lines
+      });
+      await refreshDebugCounts();
+      setMessage(`Voucher created successfully: ${voucher.voucher_number}. Review ledger mapping before filing/reporting.`);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("ABHAY document draft voucher failed", error);
+      }
+      setMessage(error instanceof Error ? error.message : "Draft voucher could not be created.");
+    } finally {
+      setIsDrafting(false);
     }
   }
 
@@ -198,6 +319,7 @@ export function UploadInvoiceWorkspace() {
             </div>
             <InfoCard title="Trial Usage" copy={`${subscription?.invoiceUploadsUsed ?? 0}/10 invoice uploads used in Free Trial.`} />
             <InfoCard title="Alpha Limits" copy="Max 10MB. PDFs analyze first 20 pages. Posting still requires human approval." />
+            <InfoCard title="ABHAY Memory OS" copy="ABHAY remembers your business context, documents, vouchers, invoices and AI decisions — building a finance memory layer over your accounting." />
             <InfoCard title="Fallback" copy="One-line AI entry remains the fastest working input when OCR is unavailable." />
             <Link className="premium-link w-full" href="/ai-workbench">Open AI Workbench</Link>
           </div>
@@ -208,18 +330,86 @@ export function UploadInvoiceWorkspace() {
             ABHAY is reading the document and preparing a review suggestion...
           </div>
         ) : null}
-        {result ? <DocumentAnalysisPanel result={result} onAction={setMessage} /> : null}
+        {debugCounts ? (
+          <div className="glass-card grid gap-3 p-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
+            <MiniDebugStat label="Vouchers" value={debugCounts.vouchers} />
+            <MiniDebugStat label="Lines" value={debugCounts.voucher_lines} />
+            <MiniDebugStat label="Invoices" value={debugCounts.invoices} />
+            <MiniDebugStat label="Entries" value={debugCounts.accounting_entries} />
+            <MiniDebugStat label="Audit" value={debugCounts.audit_logs} />
+            <MiniDebugStat label="AI Logs" value={debugCounts.ai_logs} />
+          </div>
+        ) : null}
+        {result ? (
+          <DocumentAnalysisPanel
+            result={result}
+            isDrafting={isDrafting}
+            onCreateDraftInvoice={createDraftInvoiceFromDocument}
+            onCreateDraftVoucher={createDraftVoucherFromDocument}
+            onAction={setMessage}
+          />
+        ) : null}
       </SubscriptionGate>
       <p className="empty-state">{message}</p>
     </PageFrame>
   );
 }
 
+function sampleClientDemoDocumentAnalysis(fileName: string): DocumentIntelligenceResult {
+  return {
+    id: "client-demo-document-analysis",
+    file_name: fileName || "client-demo-invoice.pdf",
+    document_type: "invoice",
+    extracted_text_summary: "Sample client demo extraction: sales invoice for Rs 50,000 taxable value, 18% GST, total Rs 59,000. This appears only when real OCR is unavailable in Client Demo Workspace.",
+    extracted_text_available: true,
+    fields: {
+      document_type: "invoice",
+      vendor_name: "ABHAY Client Demo Vendor",
+      customer_name: "ABHAY Client Customer",
+      gstin: "27ABCDE1234F1Z5",
+      invoice_number: "CLIENT-DEMO-SALES-001",
+      invoice_date: "2026-06-27",
+      subtotal: "50000.00",
+      gst_rate: "18.00",
+      gst_amount: "9000.00",
+      total_amount: "59000.00",
+      line_items: [
+        {
+          description: "AI accounting automation services",
+          hsn_sac: "9983",
+          quantity: "1",
+          unit_price: "50000.00",
+          amount: "50000.00"
+        }
+      ],
+      confidence_score: "0.78"
+    },
+    accounting_suggestion: {
+      suggested_voucher_type: "sales",
+      debit_ledger: "ABHAY Client Customer",
+      credit_ledger: "Sales + Output GST",
+      gst_treatment: "Intra-state GST: CGST Rs 4,500 and SGST Rs 4,500",
+      summary: "Sample client demo suggestion. Human approval is required before posting.",
+      warnings: ["Sample extraction shown because live OCR was unavailable."]
+    },
+    confidence_score: "0.78",
+    warnings: ["Client Demo sample analysis. Verify documents before posting in real books."],
+    human_approval_required: true,
+    draft_only: true
+  };
+}
+
 function DocumentAnalysisPanel({
   result,
+  isDrafting,
+  onCreateDraftInvoice,
+  onCreateDraftVoucher,
   onAction
 }: Readonly<{
   result: DocumentIntelligenceResult;
+  isDrafting: boolean;
+  onCreateDraftInvoice: (result: DocumentIntelligenceResult) => Promise<void>;
+  onCreateDraftVoucher: (result: DocumentIntelligenceResult) => Promise<void>;
   onAction: (message: string) => void;
 }>) {
   const fields = result.fields;
@@ -292,10 +482,12 @@ function DocumentAnalysisPanel({
           </div>
         </article>
         <div className="glass-card grid gap-2 p-4 sm:grid-cols-3 xl:grid-cols-1">
-          <Button type="button" onClick={() => onAction("Draft invoice prepared for review. Final posting requires approval.")}>
+          <Button type="button" disabled={isDrafting} onClick={() => void onCreateDraftInvoice(result)}>
+            {isDrafting ? <Loader2 className="animate-spin" size={17} /> : null}
             Create Draft Invoice
           </Button>
-          <Button type="button" variant="secondary" onClick={() => onAction("Draft voucher prepared for review. Final posting requires approval.")}>
+          <Button type="button" variant="secondary" disabled={isDrafting} onClick={() => void onCreateDraftVoucher(result)}>
+            {isDrafting ? <Loader2 className="animate-spin" size={17} /> : null}
             Create Draft Voucher
           </Button>
           <Button type="button" variant="ghost" onClick={() => onAction("Document suggestion rejected. No accounting entry was posted.")}>
@@ -307,6 +499,15 @@ function DocumentAnalysisPanel({
   );
 }
 
+function MiniDebugStat({ label, value }: Readonly<{ label: string; value: number }>) {
+  return (
+    <div className="rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
+      <p className="text-xs text-white/45">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
 function SuggestionRow({ label, value }: Readonly<{ label: string; value: string }>) {
   return (
     <div className="flex items-start justify-between gap-3 rounded-xl border border-[#1F2937] bg-[#111827]/80 p-3">
@@ -314,6 +515,66 @@ function SuggestionRow({ label, value }: Readonly<{ label: string; value: string
       <span className="text-right font-semibold text-white">{value}</span>
     </div>
   );
+}
+
+async function ensureDocumentLedgers(companyId: string, token: string) {
+  const [existingGroups, existingLedgers] = await Promise.all([
+    accountingApi.groups(companyId, token),
+    accountingApi.ledgers(companyId, token)
+  ]);
+
+  async function groupId(name: string, accountNature: "asset" | "liability" | "income" | "expense" | "equity") {
+    const existing = existingGroups.find((group) => group.account_nature === accountNature && group.name.toLowerCase() === name.toLowerCase());
+    if (existing) return existing.id;
+    const created = await accountingApi.createGroup(companyId, token, { name, account_nature: accountNature });
+    existingGroups.push(created);
+    return created.id;
+  }
+
+  async function ledger(
+    name: string,
+    category: Ledger["category"],
+    accountNature: Ledger["account_nature"],
+    groupName: string
+  ) {
+    const existing = existingLedgers.find((item) => item.name.toLowerCase() === name.toLowerCase() && item.is_active);
+    if (existing) return existing;
+    const created = await accountingApi.createLedger(companyId, token, {
+      name,
+      ledger_group_id: await groupId(groupName, accountNature),
+      category,
+      account_nature: accountNature,
+      opening_balance: "0",
+      opening_balance_type: "dr",
+      gstin: null,
+      state_code: null
+    });
+    existingLedgers.push(created);
+    return created;
+  }
+
+  return {
+    creditor: await ledger("Sundry Creditors", "sundry_creditor", "liability", "Liabilities"),
+    purchase: await ledger("Purchases", "purchase", "expense", "Expenses"),
+    inputGst: await ledger("Input GST", "input_gst", "asset", "Assets"),
+    expense: await ledger("Indirect Expenses", "indirect_expense", "expense", "Expenses"),
+    cash: await ledger("Cash", "cash", "asset", "Assets")
+  };
+}
+
+function numericAmount(value: string | number | null | undefined) {
+  const parsed = Number(String(value ?? "0").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0;
+}
+
+function normalizedDate(value: string | null | undefined) {
+  if (!value) return new Date().toISOString().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const slashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (slashMatch) return `${slashMatch[3]}-${slashMatch[2]}-${slashMatch[1]}`;
+  const dashMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dashMatch) return `${dashMatch[3]}-${dashMatch[2]}-${dashMatch[1]}`;
+  return new Date().toISOString().slice(0, 10);
 }
 
 export function EntriesLedgerWorkspace() {
@@ -363,7 +624,10 @@ export function ReportsWorkspace() {
   const [token, setToken] = useState<string | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState("");
-  const [trialBalance, setTrialBalance] = useState<Array<{ ledger_id: string; ledger_name: string; account_nature: string; category: string; debit: string; credit: string }>>([]);
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
+  const [vouchers, setVouchers] = useState<Voucher[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [trialBalance, setTrialBalance] = useState<TrialBalanceRow[]>([]);
   const [pnl, setPnl] = useState<{ revenue: string; expenses: string; profit: string } | null>(null);
   const [balanceSheet, setBalanceSheet] = useState<{ assets: string; liabilities: string; equity: string; check_difference: string } | null>(null);
   const [cashFlow, setCashFlow] = useState<{ operating_cash_flow: string; investing_cash_flow: string; financing_cash_flow: string; net_cash_flow: string } | null>(null);
@@ -384,14 +648,14 @@ export function ReportsWorkspace() {
         if (!active) return;
         setToken(accessToken);
         if (!accessToken) {
-          setStatus("Please login or continue in Alpha Demo Mode.");
+          setStatus("Please login or open Client Demo Mode.");
           return;
         }
         const rows = await accountingApi.companies(accessToken);
         if (!active) return;
         setCompanies(rows);
         setCompanyId(rows[0]?.id ?? "");
-        setStatus(rows.length ? "Select a company and refresh reports." : "No company found.");
+        setStatus(rows.length ? "Select a company, then click Refresh Reports." : "No company found.");
       })
       .catch((error: Error) => {
         if (active) setStatus(error.message);
@@ -405,7 +669,10 @@ export function ReportsWorkspace() {
     if (!token || !selectedCompanyId) return;
     setIsBusy(true);
     try {
-      const [tb, pl, bs, cf, gstRow, scrutinyRow] = await Promise.all([
+      const [ledgerRows, voucherRows, invoiceRows, tb, pl, bs, cf, gstRow, scrutinyRow] = await Promise.all([
+        accountingApi.ledgers(selectedCompanyId, token),
+        accountingApi.vouchers(selectedCompanyId, token),
+        accountingApi.invoices(selectedCompanyId, token),
         accountingApi.trialBalance(selectedCompanyId, token),
         accountingApi.profitAndLoss(selectedCompanyId, token),
         accountingApi.balanceSheet(selectedCompanyId, token),
@@ -413,6 +680,9 @@ export function ReportsWorkspace() {
         accountingApi.gstReport(selectedCompanyId, token),
         accountingApi.ledgerScrutiny(selectedCompanyId, token)
       ]);
+      setLedgers(ledgerRows);
+      setVouchers(voucherRows);
+      setInvoices(invoiceRows);
       setTrialBalance(tb);
       setPnl(pl);
       setBalanceSheet(bs);
@@ -426,11 +696,6 @@ export function ReportsWorkspace() {
       setIsBusy(false);
     }
   }
-
-  useEffect(() => {
-    if (companyId) void refreshReports(companyId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
 
   async function runTds() {
     if (!token) return;
@@ -595,6 +860,16 @@ export function ReportsWorkspace() {
             </table>
           </div>
         </section>
+
+        <DetailedReportGrids
+          ledgers={ledgers}
+          vouchers={vouchers}
+          invoices={invoices}
+          trialBalance={trialBalance}
+          pnl={pnl}
+          balanceSheet={balanceSheet}
+          cashFlow={cashFlow}
+        />
 
         <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <div className="glass-panel p-5">

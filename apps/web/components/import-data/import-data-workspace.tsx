@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { ArrowRightLeft, CheckCircle2, FileSpreadsheet, FileText, ShieldAlert, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { accountingApi } from "@/lib/api/accounting";
+import { startClientDemoSession } from "@/lib/auth/demo-auth";
 
 const gstStates = [
   { code: "27", name: "Maharashtra" },
@@ -63,6 +65,21 @@ const importOptions = [
 export function ImportDataWorkspace() {
   const [selectedState, setSelectedState] = useState("27");
   const [message, setMessage] = useState("Choose Excel or CSV to prepare an Alpha import review.");
+  const [isPreparingDemo, setIsPreparingDemo] = useState(false);
+
+  async function openClientDemoMode() {
+    setIsPreparingDemo(true);
+    try {
+      const demo = await accountingApi.clientDemoWorkspace();
+      startClientDemoSession();
+      window.localStorage.setItem("abhay.lastCompanyId", demo.company_id);
+      setMessage("Client Demo Workspace ready. You can now open Dashboard, Reports, AI Workbench, or continue reviewing import workflows.");
+    } catch {
+      setMessage("Client Demo Workspace could not be prepared. Please retry.");
+    } finally {
+      setIsPreparingDemo(false);
+    }
+  }
 
   function handleFileChange(file: File | undefined, title: string) {
     if (!file) {
@@ -92,6 +109,18 @@ export function ImportDataWorkspace() {
             </div>
           </div>
         </header>
+
+        <section className="glass-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-white">Client Demo Mode</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Open a clearly labelled sample workspace without email confirmation before reviewing import workflows.
+            </p>
+          </div>
+          <Button type="button" onClick={() => void openClientDemoMode()} disabled={isPreparingDemo}>
+            Client Demo Mode
+          </Button>
+        </section>
 
         <section className="grid gap-4 lg:grid-cols-4">
           {importOptions.map((option) => {

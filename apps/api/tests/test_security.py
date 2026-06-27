@@ -51,10 +51,28 @@ def test_demo_token_is_accepted_for_hosted_alpha_when_enabled() -> None:
     assert user.role == "owner"
 
 
-def test_demo_token_is_rejected_in_production_without_alpha_demo_mode() -> None:
+def test_demo_token_is_accepted_for_client_demo_when_enabled() -> None:
     settings = Settings(
         app_env="production",
         alpha_demo_mode=False,
+        client_demo_mode=True,
+        supabase_url="https://example.supabase.co",
+        database_url="postgresql+psycopg://postgres:postgres@localhost:5432/postgres",
+    )
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=LOCAL_DEMO_TOKEN)
+
+    user = require_user(credentials=credentials, settings=settings)
+
+    assert user.id == "local-demo-owner"
+    assert user.email == "demo@abhay.test"
+    assert user.role == "owner"
+
+
+def test_demo_token_is_rejected_in_production_without_demo_modes() -> None:
+    settings = Settings(
+        app_env="production",
+        alpha_demo_mode=False,
+        client_demo_mode=False,
         supabase_url="https://example.supabase.co",
         database_url="postgresql+psycopg://postgres:postgres@localhost:5432/postgres",
     )
@@ -80,3 +98,19 @@ def test_local_demo_session_verify_response() -> None:
         "email": "demo@abhay.test",
         "auth_role": "owner",
     }
+
+
+def test_full_health_endpoint_returns_safe_status() -> None:
+    client = TestClient(app)
+
+    response = client.get("/health/full")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["api"] == "ok"
+    assert data["ai_command"] == "ok"
+    assert data["document_intelligence"] == "ok"
+    assert data["database"] in {"ok", "fail"}
+    assert data["storage"] in {"ok", "fail"}
+    assert "timestamp" in data
+    assert "DATABASE_URL" not in response.text

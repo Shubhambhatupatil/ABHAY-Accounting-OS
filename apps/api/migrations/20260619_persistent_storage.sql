@@ -328,6 +328,9 @@ create index if not exists subscriptions_user_id_idx on subscriptions(user_id);
 create index if not exists payments_company_id_idx on payments(company_id);
 create index if not exists payments_profile_id_idx on payments(profile_id);
 create index if not exists payments_user_id_idx on payments(user_id);
+create unique index if not exists payments_razorpay_payment_id_unique_idx
+  on payments(razorpay_payment_id)
+  where razorpay_payment_id is not null;
 create index if not exists vouchers_company_id_idx on vouchers(company_id);
 create index if not exists vouchers_company_date_idx on vouchers(company_id, voucher_date);
 create index if not exists voucher_lines_company_id_idx on voucher_lines(company_id);

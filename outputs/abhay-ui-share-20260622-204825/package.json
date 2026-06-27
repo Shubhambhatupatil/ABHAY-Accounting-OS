@@ -1,0 +1,16 @@
+{
+  "name": "abhay-accounting-os",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/ui"
+  ],
+  "scripts": {
+    "dev": "npm --workspace apps/ui run dev",
+    "build": "npm --workspace apps/ui run build",
+    "preview": "npm --workspace apps/ui run preview",
+    "ui:dev": "npm --workspace apps/ui run dev",
+    "ui:build": "npm --workspace apps/ui run build",
+    "ui:preview": "npm --workspace apps/ui run preview"
+  }
+}

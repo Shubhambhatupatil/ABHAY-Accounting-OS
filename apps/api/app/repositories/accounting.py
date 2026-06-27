@@ -1196,17 +1196,15 @@ class AccountingRepository:
         ledgers_to_create = [
             ("Cash", "Assets", LedgerCategory.cash, AccountNature.asset),
             ("Bank", "Assets", LedgerCategory.bank, AccountNature.asset),
-            ("ABC Customers", "Assets", LedgerCategory.sundry_debtor, AccountNature.asset),
+            ("ABHAY Client Customer", "Assets", LedgerCategory.sundry_debtor, AccountNature.asset),
             ("Input GST", "Assets", LedgerCategory.input_gst, AccountNature.asset),
-            ("XYZ Suppliers", "Liabilities", LedgerCategory.sundry_creditor, AccountNature.liability),
+            ("ABHAY Client Vendor", "Liabilities", LedgerCategory.sundry_creditor, AccountNature.liability),
             ("Output GST", "Liabilities", LedgerCategory.output_gst, AccountNature.liability),
             ("Sales", "Income", LedgerCategory.sales, AccountNature.income),
             ("Purchases", "Expenses", LedgerCategory.purchase, AccountNature.expense),
-            ("Office Rent", "Expenses", LedgerCategory.indirect_expense, AccountNature.expense),
             ("Mobile Recharge Expense", "Expenses", LedgerCategory.indirect_expense, AccountNature.expense),
             ("Communication Expense", "Expenses", LedgerCategory.indirect_expense, AccountNature.expense),
             ("Internet & Phone Expense", "Expenses", LedgerCategory.indirect_expense, AccountNature.expense),
-            ("Diesel Expense", "Expenses", LedgerCategory.direct_expense, AccountNature.expense),
             ("Capital Account", "Equity", LedgerCategory.capital, AccountNature.equity),
         ]
         ledgers = {}
@@ -1223,73 +1221,41 @@ class AccountingRepository:
             )
             ledgers[name] = ledger
 
-        voucher_payloads = [
-            VoucherCreate(
-                voucher_type=VoucherType.receipt,
-                voucher_date=DEMO_DATE,
-                narration="Demo customer receipt",
-                lines=[
-                    VoucherLineCreate(ledger_id=ledgers["Bank"].id, debit=Decimal("60000.00")),
-                    VoucherLineCreate(ledger_id=ledgers["ABC Customers"].id, credit=Decimal("60000.00")),
-                ],
-            ),
-            VoucherCreate(
-                voucher_type=VoucherType.payment,
-                voucher_date=DEMO_DATE,
-                narration="Demo office rent paid",
-                lines=[
-                    VoucherLineCreate(ledger_id=ledgers["Office Rent"].id, debit=Decimal("12000.00")),
-                    VoucherLineCreate(ledger_id=ledgers["Cash"].id, credit=Decimal("12000.00")),
-                ],
-            ),
-            VoucherCreate(
-                voucher_type=VoucherType.payment,
-                voucher_date=DEMO_DATE,
-                narration="Demo diesel paid",
-                lines=[
-                    VoucherLineCreate(ledger_id=ledgers["Diesel Expense"].id, debit=Decimal("2500.00")),
-                    VoucherLineCreate(ledger_id=ledgers["Cash"].id, credit=Decimal("2500.00")),
-                ],
-            ),
-        ]
-        for payload in voucher_payloads:
-            self.create_voucher(company.id, user_id, payload)
-
         invoices = [
             InvoiceCreate(
                 invoice_type=InvoiceType.sales,
-                invoice_number="DEMO-SALES-001",
+                invoice_number="CLIENT-DEMO-SALES-001",
                 invoice_date=DEMO_DATE,
-                due_date=date(2026, 4, 20),
-                party_ledger_id=ledgers["ABC Customers"].id,
+                due_date=date(2026, 7, 7),
+                party_ledger_id=ledgers["ABHAY Client Customer"].id,
                 gst_supply_type=GstSupplyType.intra_state,
-                notes="Demo sales invoice",
+                notes="Client Demo Workspace sales invoice: Rs 50,000 + 18% GST.",
                 lines=[
                     InvoiceLineCreate(
-                        description="Consulting services",
+                        description="AI accounting automation services",
                         hsn_sac="9983",
                         quantity=Decimal("1"),
                         unit="NOS",
-                        unit_price=Decimal("100000.00"),
+                        unit_price=Decimal("50000.00"),
                         gst_rate=Decimal("18.00"),
                     )
                 ],
             ),
             InvoiceCreate(
                 invoice_type=InvoiceType.purchase,
-                invoice_number="DEMO-PURCHASE-001",
+                invoice_number="CLIENT-DEMO-PURCHASE-001",
                 invoice_date=DEMO_DATE,
-                due_date=date(2026, 4, 18),
-                party_ledger_id=ledgers["XYZ Suppliers"].id,
+                due_date=date(2026, 7, 7),
+                party_ledger_id=ledgers["ABHAY Client Vendor"].id,
                 gst_supply_type=GstSupplyType.intra_state,
-                notes="Demo purchase invoice",
+                notes="Client Demo Workspace purchase invoice: Rs 20,000 + 18% GST.",
                 lines=[
                     InvoiceLineCreate(
-                        description="Raw materials",
-                        hsn_sac="7208",
+                        description="Business purchase",
+                        hsn_sac="9983",
                         quantity=Decimal("1"),
                         unit="NOS",
-                        unit_price=Decimal("40000.00"),
+                        unit_price=Decimal("20000.00"),
                         gst_rate=Decimal("18.00"),
                     )
                 ],
@@ -1298,9 +1264,32 @@ class AccountingRepository:
         for payload in invoices:
             self.create_invoice(company.id, user_id, payload)
 
-        bank_account = self.get_or_create_bank_account(company.id, ledgers["Bank"].id, "Demo Bank")
+        voucher_payloads = [
+            VoucherCreate(
+                voucher_type=VoucherType.receipt,
+                voucher_date=DEMO_DATE,
+                narration="Client Demo receipt against sales invoice",
+                lines=[
+                    VoucherLineCreate(ledger_id=ledgers["Bank"].id, debit=Decimal("59000.00")),
+                    VoucherLineCreate(ledger_id=ledgers["ABHAY Client Customer"].id, credit=Decimal("59000.00")),
+                ],
+            ),
+            VoucherCreate(
+                voucher_type=VoucherType.payment,
+                voucher_date=DEMO_DATE,
+                narration="Client Demo payment against purchase invoice",
+                lines=[
+                    VoucherLineCreate(ledger_id=ledgers["ABHAY Client Vendor"].id, debit=Decimal("23600.00")),
+                    VoucherLineCreate(ledger_id=ledgers["Bank"].id, credit=Decimal("23600.00")),
+                ],
+            ),
+        ]
+        for payload in voucher_payloads:
+            self.create_voucher(company.id, user_id, payload)
+
+        bank_account = self.get_or_create_bank_account(company.id, ledgers["Bank"].id, "Client Demo Bank")
         parsed = parse_bank_csv(DEMO_BANK_CSV)
-        self.create_bank_statement(company.id, user_id, bank_account, "demo-bank.csv", parsed)
+        self.create_bank_statement(company.id, user_id, bank_account, "client-demo-bank.csv", parsed)
         return DemoSeedResult(company.id, company.legal_name, len(ledgers), len(voucher_payloads), len(invoices), len(parsed))
 
     def ensure_local_demo_identity(self, user_id: UUID) -> None:

@@ -73,6 +73,6 @@ if (!SIGNUP_FIELD_LABELS.includes("Business Name")) {
   throw new Error("Signup Business Name field missing");
 }
 
-if (!AUTH_ACTION_LABELS.includes("Continue in Alpha Demo Mode")) {
-  throw new Error("Alpha demo action missing");
+if (!AUTH_ACTION_LABELS.includes("Client Demo Mode")) {
+  throw new Error("Client demo action missing");
 }

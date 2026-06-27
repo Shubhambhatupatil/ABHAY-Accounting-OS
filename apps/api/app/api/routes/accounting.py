@@ -1,5 +1,6 @@
 import csv
 import logging
+from datetime import date
 from decimal import Decimal
 from io import StringIO
 from uuid import UUID
@@ -10,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.config import Settings, get_settings
 from app.core.security import AuthenticatedUser, require_user
 from app.domain.accounting.engine import AccountingValidationError, money
 from app.models.accounting import (
@@ -17,11 +19,18 @@ from app.models.accounting import (
     AccountNature,
     AiLog,
     AuditLog,
+    BankTransaction,
+    DocumentAiLog,
     Invoice,
+    InvoiceLine,
     InvoiceType,
+    InventoryItem,
     JournalEntry,
+    Ledger,
     LedgerCategory,
+    GstSupplyType,
     Voucher,
+    VoucherType,
 )
 from app.repositories.accounting import AccountingRepository
 from app.schemas.accounting import (
@@ -42,6 +51,7 @@ from app.schemas.accounting import (
     EsicCalculatorResponse,
     InvoiceCreate,
     InvoiceGstSummaryRow,
+    InvoiceLineCreate,
     InvoiceLineResponse,
     InvoiceResponse,
     LedgerCreate,
@@ -58,6 +68,7 @@ from app.schemas.accounting import (
     TdsCalculatorResponse,
     TrialBalanceRow,
     VoucherCreate,
+    VoucherLineCreate,
     VoucherLineResponse,
     VoucherResponse,
 )
@@ -328,6 +339,42 @@ def create_demo_company(
     )
 
 
+@router.post("/api/demo/client-workspace")
+def create_client_demo_workspace(
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not settings.client_demo_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Client Demo Mode is disabled.",
+        )
+    demo_user_id = UUID("00000000-0000-0000-0000-000000000001")
+    try:
+        result = AccountingRepository(db).create_demo_company(
+            demo_user_id,
+            "demo@abhay.local",
+            "Client Demo User",
+        )
+    except SQLAlchemyError as exc:
+        logger.warning("Database unavailable while creating client demo workspace", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Client Demo Workspace could not be prepared. Please retry.",
+        ) from exc
+    return {
+        "success": True,
+        "mode": "client_demo",
+        "company_id": str(result.company_id),
+        "company_name": result.legal_name,
+        "user": {
+            "name": "Client Demo User",
+            "email": "demo@abhay.local",
+            "role": "owner",
+        },
+    }
+
+
 @router.get("/companies/{company_id}/ledger-groups", response_model=list[LedgerGroupResponse])
 def list_ledger_groups(
     company_id: UUID,
@@ -345,26 +392,255 @@ def debug_counts(
     db: Session = Depends(get_db),
 ) -> DebugCountsResponse:
     repo_for_company(company_id, user, db)
-    journal_line_count = db.scalar(
-        select(func.count(JournalEntry.id)).where(JournalEntry.company_id == company_id)
-    ) or 0
-    physical_voucher_lines = 0
-    if inspect(db.bind).has_table("voucher_lines"):
-        physical_voucher_lines = db.execute(
-            text("select count(*) from voucher_lines where company_id = :company_id"),
-            {"company_id": str(company_id)},
-        ).scalar_one()
+    journal_line_count = count_model_rows(db, JournalEntry, company_id)
+    physical_voucher_lines = count_table_rows(db, "voucher_lines", company_id)
+    invoice_line_count = count_model_rows(db, InvoiceLine, company_id)
+    physical_invoice_items = count_table_rows(db, "invoice_items", company_id)
 
     return DebugCountsResponse(
-        vouchers=db.scalar(select(func.count(Voucher.id)).where(Voucher.company_id == company_id)) or 0,
+        ledgers=count_model_rows(db, Ledger, company_id),
+        vouchers=count_model_rows(db, Voucher, company_id),
         voucher_lines=int(journal_line_count) + int(physical_voucher_lines),
-        invoices=db.scalar(select(func.count(Invoice.id)).where(Invoice.company_id == company_id)) or 0,
-        accounting_entries=db.scalar(
-            select(func.count(AccountingEntry.id)).where(AccountingEntry.company_id == company_id)
-        ) or 0,
-        audit_logs=db.scalar(select(func.count(AuditLog.id)).where(AuditLog.company_id == company_id)) or 0,
-        ai_logs=db.scalar(select(func.count(AiLog.id)).where(AiLog.company_id == company_id)) or 0,
+        accounting_entries=count_model_rows(db, AccountingEntry, company_id),
+        invoices=count_model_rows(db, Invoice, company_id),
+        invoice_items=int(invoice_line_count) + int(physical_invoice_items),
+        bank_transactions=count_model_rows(db, BankTransaction, company_id),
+        ai_logs=count_model_rows(db, AiLog, company_id),
+        document_ai_logs=count_model_rows(db, DocumentAiLog, company_id),
+        audit_logs=count_model_rows(db, AuditLog, company_id),
+        inventory_items=count_model_rows(db, InventoryItem, company_id),
     )
+
+
+def count_model_rows(db: Session, model, company_id: UUID) -> int:
+    return int(db.scalar(select(func.count(model.id)).where(model.company_id == company_id)) or 0)
+
+
+def count_table_rows(db: Session, table_name: str, company_id: UUID) -> int:
+    if db.bind is None or not inspect(db.bind).has_table(table_name):
+        return 0
+    return int(
+        db.execute(
+            text(f"select count(*) from {table_name} where company_id = :company_id"),
+            {"company_id": str(company_id)},
+        ).scalar_one()
+    )
+
+
+@router.post("/companies/{company_id}/sample-data", response_model=DebugCountsResponse)
+def create_company_sample_data(
+    company_id: UUID,
+    user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> DebugCountsResponse:
+    repo = repo_for_company(company_id, user, db)
+    actor_id = user_uuid(user)
+    ledgers = ensure_sample_ledgers(repo, db, company_id, actor_id)
+    sample_vouchers = [
+        (
+            "ABHAY Sample capital introduced",
+            VoucherType.journal,
+            [
+                VoucherLineCreate(ledger_id=ledgers["Bank"].id, debit=Decimal("100000.00")),
+                VoucherLineCreate(ledger_id=ledgers["Capital Account"].id, credit=Decimal("100000.00")),
+            ],
+        ),
+        (
+            "ABHAY Sample customer receipt",
+            VoucherType.receipt,
+            [
+                VoucherLineCreate(ledger_id=ledgers["Bank"].id, debit=Decimal("25000.00")),
+                VoucherLineCreate(ledger_id=ledgers["ABHAY Sample Customer"].id, credit=Decimal("25000.00")),
+            ],
+        ),
+        (
+            "ABHAY Sample office expense paid",
+            VoucherType.payment,
+            [
+                VoucherLineCreate(ledger_id=ledgers["Office Expense"].id, debit=Decimal("4500.00")),
+                VoucherLineCreate(ledger_id=ledgers["Cash"].id, credit=Decimal("4500.00")),
+            ],
+        ),
+    ]
+    for narration, voucher_type, lines in sample_vouchers:
+        exists = db.scalar(
+            select(Voucher.id).where(Voucher.company_id == company_id, Voucher.narration == narration)
+        )
+        if exists is None:
+            repo.create_voucher(
+                company_id,
+                actor_id,
+                VoucherCreate(
+                    voucher_type=voucher_type,
+                    voucher_date=date(2026, 3, 10),
+                    narration=narration,
+                    lines=lines,
+                ),
+            )
+
+    sample_invoices = [
+        (
+            "ABHAY-SAMPLE-SALES-001",
+            InvoiceType.sales,
+            ledgers["ABHAY Sample Customer"].id,
+            "ABHAY Sample sales invoice",
+            "AI accounting automation services",
+            Decimal("18000.00"),
+        ),
+        (
+            "ABHAY-SAMPLE-PURCHASE-001",
+            InvoiceType.purchase,
+            ledgers["ABHAY Sample Supplier"].id,
+            "ABHAY Sample purchase invoice",
+            "Office technology supplies",
+            Decimal("8000.00"),
+        ),
+    ]
+    for invoice_number, invoice_type, party_ledger_id, notes, description, unit_price in sample_invoices:
+        exists = db.scalar(
+            select(Invoice.id).where(
+                Invoice.company_id == company_id,
+                Invoice.invoice_number == invoice_number,
+            )
+        )
+        if exists is None:
+            repo.create_invoice(
+                company_id,
+                actor_id,
+                InvoiceCreate(
+                    invoice_type=invoice_type,
+                    invoice_number=invoice_number,
+                    invoice_date=date(2026, 3, 10),
+                    due_date=date(2026, 3, 25),
+                    party_ledger_id=party_ledger_id,
+                    gst_supply_type=GstSupplyType.intra_state,
+                    notes=notes,
+                    lines=[
+                        InvoiceLineCreate(
+                            description=description,
+                            hsn_sac="9983",
+                            quantity=Decimal("1"),
+                            unit="NOS",
+                            unit_price=unit_price,
+                            discount_amount=Decimal("0.00"),
+                            gst_rate=Decimal("18.00"),
+                        )
+                    ],
+                ),
+            )
+
+    ensure_sample_inventory(db, repo, company_id, actor_id)
+    return debug_counts(company_id, user, db)
+
+
+def ensure_sample_ledgers(
+    repo: AccountingRepository,
+    db: Session,
+    company_id: UUID,
+    actor_id: UUID,
+) -> dict[str, Ledger]:
+    existing = {
+        ledger.name: ledger
+        for ledger in db.scalars(select(Ledger).where(Ledger.company_id == company_id)).all()
+    }
+    required = [
+        ("Cash", LedgerCategory.cash, AccountNature.asset, "Assets"),
+        ("Bank", LedgerCategory.bank, AccountNature.asset, "Assets"),
+        ("ABHAY Sample Customer", LedgerCategory.sundry_debtor, AccountNature.asset, "Assets"),
+        ("Input GST", LedgerCategory.input_gst, AccountNature.asset, "Assets"),
+        ("ABHAY Sample Supplier", LedgerCategory.sundry_creditor, AccountNature.liability, "Liabilities"),
+        ("Output GST", LedgerCategory.output_gst, AccountNature.liability, "Liabilities"),
+        ("Sales", LedgerCategory.sales, AccountNature.income, "Income"),
+        ("Purchases", LedgerCategory.purchase, AccountNature.expense, "Expenses"),
+        ("Office Expense", LedgerCategory.indirect_expense, AccountNature.expense, "Expenses"),
+        ("Capital Account", LedgerCategory.capital, AccountNature.equity, "Equity"),
+    ]
+    for name, category, nature, group_name in required:
+        if name not in existing:
+            group = ensure_sample_group(repo, db, company_id, actor_id, group_name, nature)
+            existing[name] = repo.create_ledger(
+                company_id,
+                actor_id,
+                LedgerCreate(
+                    name=name,
+                    ledger_group_id=group.id,
+                    category=category,
+                    account_nature=nature,
+                ),
+            )
+    return existing
+
+
+def ensure_sample_group(
+    repo: AccountingRepository,
+    db: Session,
+    company_id: UUID,
+    actor_id: UUID,
+    name: str,
+    nature: AccountNature,
+):
+    from app.models.accounting import LedgerGroup
+
+    group = db.scalar(
+        select(LedgerGroup).where(
+            LedgerGroup.company_id == company_id,
+            LedgerGroup.name == name,
+            LedgerGroup.account_nature == nature,
+        )
+    )
+    if group is not None:
+        return group
+    return repo.create_group(company_id, actor_id, name, nature)
+
+
+def ensure_sample_inventory(
+    db: Session,
+    repo: AccountingRepository,
+    company_id: UUID,
+    actor_id: UUID,
+) -> None:
+    items = [
+        ("ABHAY Sample Laptop", "ABHAY-LAP-001", "NOS", "8471", Decimal("2"), Decimal("3"), Decimal("1"), Decimal("55000.00")),
+        ("ABHAY Sample Printer", "ABHAY-PRN-001", "NOS", "8443", Decimal("1"), Decimal("2"), Decimal("1"), Decimal("18000.00")),
+    ]
+    created = False
+    for item_name, sku, unit, hsn_sac, opening, purchase, sales, rate in items:
+        exists = db.scalar(
+            select(InventoryItem.id).where(
+                InventoryItem.company_id == company_id,
+                InventoryItem.sku == sku,
+            )
+        )
+        if exists is not None:
+            continue
+        closing = opening + purchase - sales
+        db.add(
+            InventoryItem(
+                company_id=company_id,
+                item_name=item_name,
+                sku=sku,
+                unit=unit,
+                hsn_sac=hsn_sac,
+                opening_stock=opening,
+                purchase_stock=purchase,
+                sales_stock=sales,
+                closing_stock=closing,
+                rate=rate,
+                stock_value=money(closing * rate),
+                created_by=actor_id,
+            )
+        )
+        created = True
+    if created:
+        repo.add_audit_log(
+            company_id,
+            actor_id,
+            "inventory.sample_data_created",
+            "inventory_item",
+            None,
+            {"items": [item[0] for item in items]},
+        )
+        db.commit()
 
 
 @router.post("/companies/{company_id}/ledger-groups", response_model=LedgerGroupResponse)

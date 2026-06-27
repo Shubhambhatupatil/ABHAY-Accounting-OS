@@ -55,12 +55,17 @@ class DemoCompanyResponse(BaseModel):
 
 
 class DebugCountsResponse(BaseModel):
+    ledgers: int
     vouchers: int
     voucher_lines: int
-    invoices: int
     accounting_entries: int
-    audit_logs: int
+    invoices: int
+    invoice_items: int
+    bank_transactions: int
     ai_logs: int
+    document_ai_logs: int
+    audit_logs: int
+    inventory_items: int
 
 
 class LedgerGroupCreate(BaseModel):

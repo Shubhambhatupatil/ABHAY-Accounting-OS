@@ -121,3 +121,44 @@ def test_document_intelligence_rejects_unsupported_file_type() -> None:
         assert response.json()["detail"] == "Upload a PDF, PNG, JPG, or JPEG document."
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_document_intelligence_rejects_oversized_upload_before_reading() -> None:
+    with_isolated_database()
+    try:
+        company_id = create_demo_company(client)
+
+        response = client.post(
+            f"/companies/{company_id}/document-intelligence/upload",
+            headers={
+                **AUTH_HEADERS,
+                "Content-Type": "application/pdf",
+                "X-File-Name": "large.pdf",
+                "Content-Length": str(10 * 1024 * 1024 + 1),
+            },
+            content=b"%PDF-1.4",
+        )
+
+        assert response.status_code == 413
+        assert response.json()["detail"] == "File too large for Alpha. Upload a document up to 10MB."
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_document_intelligence_image_ocr_unavailable_safe_fallback() -> None:
+    with_isolated_database()
+    try:
+        company_id = create_demo_company(client)
+
+        response = client.post(
+            f"/companies/{company_id}/document-intelligence/upload",
+            headers={**AUTH_HEADERS, "Content-Type": "image/png", "X-File-Name": "scan.png"},
+            content=b"not-a-real-image",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["extracted_text_available"] is False
+        assert "Image/scanned OCR is coming soon" in " ".join(data["warnings"])
+    finally:
+        app.dependency_overrides.pop(get_db, None)

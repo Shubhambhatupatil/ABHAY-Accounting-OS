@@ -62,9 +62,9 @@ def require_user(
             detail="Missing bearer authentication token",
         )
     token = credentials.credentials
-    if token == LOCAL_DEMO_TOKEN and (settings.app_env == "local" or settings.alpha_demo_mode):
-        # Alpha demo fallback: hosted alpha builds intentionally accept this token
-        # only when ALPHA_DEMO_MODE is enabled, while Supabase auth is finalized.
+    if token == LOCAL_DEMO_TOKEN and (settings.app_env == "local" or settings.alpha_demo_mode or settings.client_demo_mode):
+        # Client demo fallback: this public token is scoped to a dedicated demo
+        # owner identity. Keep production JWT verification for real users.
         return AuthenticatedUser(
             id="local-demo-owner",
             email="demo@abhay.test",

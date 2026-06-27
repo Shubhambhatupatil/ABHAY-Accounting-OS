@@ -1,6 +1,7 @@
 node_modules/
 .next/
 apps/web/.next/
+apps/ui/dist/
 apps/web/node_modules/
 apps/api/.pytest_cache/
 __pycache__/

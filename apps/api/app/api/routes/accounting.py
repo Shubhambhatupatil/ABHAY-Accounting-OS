@@ -344,29 +344,48 @@ def create_client_demo_workspace(
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ) -> dict:
+    logger.info("Client demo workspace step started: loading settings")
     if not settings.client_demo_mode:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Client Demo Mode is disabled.",
         )
+    logger.info("Client demo workspace step completed: loading settings")
     demo_user_id = UUID("00000000-0000-0000-0000-000000000001")
     try:
-        result = AccountingRepository(db).create_demo_company(
-            demo_user_id,
-            "demo@abhay.local",
-            "Client Demo User",
-        )
+        repo = AccountingRepository(db)
+        result = repo.create_demo_company(demo_user_id, "demo@abhay.local", "Client Demo User")
     except SQLAlchemyError as exc:
-        logger.warning("Database unavailable while creating client demo workspace", exc_info=exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Client Demo Workspace could not be prepared. Please retry.",
-        ) from exc
+        logger.exception("Client demo workspace database preparation failed")
+        db.rollback()
+        fallback = AccountingRepository(db).load_existing_demo_company(demo_user_id)
+        if fallback is not None:
+            logger.warning("Client demo workspace reused existing data after seed failure", exc_info=exc)
+            result = fallback
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Client Demo Workspace could not be prepared. Please retry.",
+            ) from exc
+    except Exception as exc:
+        logger.exception("Client demo workspace preparation failed")
+        db.rollback()
+        fallback = AccountingRepository(db).load_existing_demo_company(demo_user_id)
+        if fallback is not None:
+            logger.warning("Client demo workspace reused existing data after unexpected seed failure", exc_info=exc)
+            result = fallback
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Client Demo Workspace could not be prepared. Please retry.",
+            ) from exc
     return {
         "success": True,
         "mode": "client_demo",
         "company_id": str(result.company_id),
         "company_name": result.legal_name,
+        "seeded": result.seeded,
+        "reused": result.reused,
         "user": {
             "name": "Client Demo User",
             "email": "demo@abhay.local",

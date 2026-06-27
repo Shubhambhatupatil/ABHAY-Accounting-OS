@@ -13,6 +13,8 @@ class DemoSeedResult:
     seeded_vouchers: int
     seeded_invoices: int
     seeded_bank_transactions: int
+    seeded: bool = False
+    reused: bool = False
 
 
 DEMO_DATE = date(2026, 6, 27)

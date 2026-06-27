@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -45,6 +46,8 @@ from app.models.accounting import (
 )
 from app.schemas.accounting import InvoiceCreate, InvoiceLineCreate, LedgerCreate, LedgerUpdate, VoucherCreate, VoucherLineCreate
 from app.domain.banking.reconciliation import parse_bank_csv
+
+logger = logging.getLogger(__name__)
 
 
 def json_safe(value):
@@ -1144,55 +1147,16 @@ class AccountingRepository:
         email: str | None = None,
         full_name: str | None = None,
     ) -> DemoSeedResult:
-        self.ensure_user_identity(user_id, email, full_name)
-        existing = self.db.scalar(
-            select(Company)
-            .join(CompanyMember, CompanyMember.company_id == Company.id)
-            .where(
-                CompanyMember.profile_id == user_id,
-                Company.legal_name == DEMO_COMPANY_NAME,
-                CompanyMember.status == MembershipStatus.active,
-            )
+        self._client_demo_step("creating demo user", lambda: self.ensure_user_identity(user_id, email, full_name))
+        company, reused_company = self._client_demo_step(
+            "creating demo company",
+            lambda: self.ensure_client_demo_company(user_id),
         )
-        if existing:
-            self.ensure_launch_ai_ledgers(existing.id)
-            return DemoSeedResult(existing.id, existing.legal_name, 0, 0, 0, 0)
-
-        company = Company(
-            id=uuid4(),
-            legal_name=DEMO_COMPANY_NAME,
-            trade_name=DEMO_COMPANY_NAME,
-            gstin="27ABCDE1234F1Z5",
-            created_by=user_id,
+        self._client_demo_step(
+            "creating company member",
+            lambda: self.ensure_client_demo_membership(company.id, user_id),
         )
-        self.db.add(company)
-        owner_role_id = self.db.scalar(select(Role.id).where(Role.code == "owner"))
-        if owner_role_id is None:
-            owner_role_id = uuid4()
-            self.db.add(
-                Role(
-                    id=owner_role_id,
-                    code="owner",
-                    name="Owner",
-                    description="Demo owner role",
-                )
-            )
-        self.db.add(
-            CompanyMember(
-                id=uuid4(),
-                company_id=company.id,
-                profile_id=user_id,
-                role_id=owner_role_id,
-                status=MembershipStatus.active,
-            )
-        )
-        groups = {
-            "Assets": self.create_group(company.id, user_id, "Assets", AccountNature.asset),
-            "Liabilities": self.create_group(company.id, user_id, "Liabilities", AccountNature.liability),
-            "Income": self.create_group(company.id, user_id, "Income", AccountNature.income),
-            "Expenses": self.create_group(company.id, user_id, "Expenses", AccountNature.expense),
-            "Equity": self.create_group(company.id, user_id, "Equity", AccountNature.equity),
-        }
+        groups = self._client_demo_step("seeding ledger groups", lambda: self.ensure_client_demo_groups(company.id))
         ledgers_to_create = [
             ("Cash", "Assets", LedgerCategory.cash, AccountNature.asset),
             ("Bank", "Assets", LedgerCategory.bank, AccountNature.asset),
@@ -1207,19 +1171,10 @@ class AccountingRepository:
             ("Internet & Phone Expense", "Expenses", LedgerCategory.indirect_expense, AccountNature.expense),
             ("Capital Account", "Equity", LedgerCategory.capital, AccountNature.equity),
         ]
-        ledgers = {}
-        for name, group_name, category, nature in ledgers_to_create:
-            ledger = self.create_ledger(
-                company.id,
-                user_id,
-                LedgerCreate(
-                    name=name,
-                    ledger_group_id=groups[group_name].id,
-                    category=category,
-                    account_nature=nature,
-                ),
-            )
-            ledgers[name] = ledger
+        ledgers, seeded_ledgers = self._client_demo_step(
+            "seeding ledgers",
+            lambda: self.ensure_client_demo_ledgers(company.id, user_id, groups, ledgers_to_create),
+        )
 
         invoices = [
             InvoiceCreate(
@@ -1261,8 +1216,10 @@ class AccountingRepository:
                 ],
             ),
         ]
-        for payload in invoices:
-            self.create_invoice(company.id, user_id, payload)
+        seeded_invoices = self._client_demo_step(
+            "seeding invoices",
+            lambda: self.ensure_client_demo_invoices(company.id, user_id, invoices),
+        )
 
         voucher_payloads = [
             VoucherCreate(
@@ -1284,13 +1241,288 @@ class AccountingRepository:
                 ],
             ),
         ]
-        for payload in voucher_payloads:
-            self.create_voucher(company.id, user_id, payload)
+        seeded_vouchers = self._client_demo_step(
+            "seeding vouchers",
+            lambda: self.ensure_client_demo_vouchers(company.id, user_id, voucher_payloads),
+        )
+        seeded_bank_transactions = self._client_demo_step(
+            "seeding bank transactions",
+            lambda: self.ensure_client_demo_bank_transactions(company.id, user_id, ledgers["Bank"].id),
+        )
+        self._client_demo_step("committing database", self.db.commit)
+        seeded_any = any([seeded_ledgers, seeded_invoices, seeded_vouchers, seeded_bank_transactions])
+        return DemoSeedResult(
+            company.id,
+            company.legal_name,
+            seeded_ledgers,
+            seeded_vouchers,
+            seeded_invoices,
+            seeded_bank_transactions,
+            seeded=seeded_any,
+            reused=reused_company or not seeded_any,
+        )
 
-        bank_account = self.get_or_create_bank_account(company.id, ledgers["Bank"].id, "Client Demo Bank")
+    def _client_demo_step(self, step: str, action):
+        logger.info("Client demo workspace step started: %s", step)
+        try:
+            result = action()
+        except Exception:
+            logger.exception("Client demo workspace failed while %s", step)
+            raise
+        logger.info("Client demo workspace step completed: %s", step)
+        return result
+
+    def ensure_client_demo_company(self, user_id: UUID) -> tuple[Company, bool]:
+        company = self.db.scalar(
+            select(Company)
+            .join(CompanyMember, CompanyMember.company_id == Company.id)
+            .where(
+                CompanyMember.profile_id == user_id,
+                Company.legal_name == DEMO_COMPANY_NAME,
+                CompanyMember.status == MembershipStatus.active,
+            )
+        )
+        if company:
+            return company, True
+        company = self.db.scalar(select(Company).where(Company.legal_name == DEMO_COMPANY_NAME))
+        if company:
+            return company, True
+        company = Company(
+            id=uuid4(),
+            legal_name=DEMO_COMPANY_NAME,
+            trade_name=DEMO_COMPANY_NAME,
+            gstin="27ABCDE1234F1Z5",
+            state_code="27",
+            created_by=user_id,
+        )
+        self.db.add(company)
+        self.db.flush()
+        return company, False
+
+    def ensure_client_demo_membership(self, company_id: UUID, user_id: UUID) -> None:
+        owner_role = self.get_or_create_role("owner", "Owner", "Demo workspace owner")
+        member = self.db.scalar(
+            select(CompanyMember).where(
+                CompanyMember.company_id == company_id,
+                CompanyMember.profile_id == user_id,
+            )
+        )
+        if member is None:
+            self.db.add(
+                CompanyMember(
+                    id=uuid4(),
+                    company_id=company_id,
+                    profile_id=user_id,
+                    role_id=owner_role.id,
+                    status=MembershipStatus.active,
+                )
+            )
+        else:
+            member.role_id = owner_role.id
+            member.status = MembershipStatus.active
+        self.db.flush()
+
+    def ensure_client_demo_groups(self, company_id: UUID) -> dict[str, LedgerGroup]:
+        required = {
+            "Assets": AccountNature.asset,
+            "Liabilities": AccountNature.liability,
+            "Income": AccountNature.income,
+            "Expenses": AccountNature.expense,
+            "Equity": AccountNature.equity,
+        }
+        groups: dict[str, LedgerGroup] = {}
+        for name, nature in required.items():
+            group = self.db.scalar(
+                select(LedgerGroup).where(
+                    LedgerGroup.company_id == company_id,
+                    LedgerGroup.name == name,
+                    LedgerGroup.account_nature == nature,
+                )
+            )
+            if group is None:
+                group = LedgerGroup(
+                    id=uuid4(),
+                    company_id=company_id,
+                    name=name,
+                    account_nature=nature,
+                    parent_id=None,
+                    is_system=True,
+                )
+                self.db.add(group)
+                self.db.flush()
+            groups[name] = group
+        return groups
+
+    def ensure_client_demo_ledgers(
+        self,
+        company_id: UUID,
+        user_id: UUID,
+        groups: dict[str, LedgerGroup],
+        ledgers_to_create: list[tuple[str, str, LedgerCategory, AccountNature]],
+    ) -> tuple[dict[str, Ledger], int]:
+        ledgers: dict[str, Ledger] = {}
+        created = 0
+        for name, group_name, category, nature in ledgers_to_create:
+            ledger = self.db.scalar(
+                select(Ledger).where(
+                    Ledger.company_id == company_id,
+                    Ledger.name == name,
+                )
+            )
+            if ledger is None:
+                ledger = Ledger(
+                    id=uuid4(),
+                    company_id=company_id,
+                    ledger_group_id=groups[group_name].id,
+                    name=name,
+                    category=category,
+                    account_nature=nature,
+                    opening_balance=Decimal("0.00"),
+                    opening_balance_type="dr",
+                    gstin=None,
+                    state_code=None,
+                    is_system=True,
+                    is_active=True,
+                )
+                self.db.add(ledger)
+                self.add_audit_log(
+                    company_id,
+                    user_id,
+                    "ledger.created",
+                    "ledger",
+                    ledger.id,
+                    {"name": ledger.name, "category": ledger.category.value, "source": "client_demo"},
+                )
+                created += 1
+                self.db.flush()
+            ledgers[name] = ledger
+        self.db.commit()
+        return ledgers, created
+
+    def ensure_client_demo_invoices(
+        self,
+        company_id: UUID,
+        user_id: UUID,
+        invoices: list[InvoiceCreate],
+    ) -> int:
+        created = 0
+        for payload in invoices:
+            exists = self.db.scalar(
+                select(Invoice.id).where(
+                    Invoice.company_id == company_id,
+                    Invoice.invoice_number == payload.invoice_number,
+                )
+            )
+            if exists is None:
+                self.create_invoice(company_id, user_id, payload)
+                created += 1
+        return created
+
+    def ensure_client_demo_vouchers(
+        self,
+        company_id: UUID,
+        user_id: UUID,
+        voucher_payloads: list[VoucherCreate],
+    ) -> int:
+        created = 0
+        for payload in voucher_payloads:
+            exists = self.db.scalar(
+                select(Voucher.id).where(
+                    Voucher.company_id == company_id,
+                    Voucher.narration == payload.narration,
+                    Voucher.voucher_type == payload.voucher_type,
+                )
+            )
+            if exists is None:
+                self.create_voucher(company_id, user_id, payload)
+                created += 1
+        return created
+
+    def ensure_client_demo_bank_transactions(
+        self,
+        company_id: UUID,
+        user_id: UUID,
+        bank_ledger_id: UUID,
+    ) -> int:
+        bank_account = self.get_or_create_bank_account(company_id, bank_ledger_id, "Client Demo Bank")
         parsed = parse_bank_csv(DEMO_BANK_CSV)
-        self.create_bank_statement(company.id, user_id, bank_account, "client-demo-bank.csv", parsed)
-        return DemoSeedResult(company.id, company.legal_name, len(ledgers), len(voucher_payloads), len(invoices), len(parsed))
+        statement = self.db.scalar(
+            select(BankStatement).where(
+                BankStatement.company_id == company_id,
+                BankStatement.file_path == "local-upload://client-demo-bank.csv",
+            )
+        )
+        if statement is None:
+            dates = [item.transaction_date for item in parsed]
+            statement = BankStatement(
+                id=uuid4(),
+                company_id=company_id,
+                bank_account_id=bank_account.id,
+                file_path="local-upload://client-demo-bank.csv",
+                statement_from=min(dates, default=None),
+                statement_to=max(dates, default=None),
+                uploaded_by=user_id,
+                created_at=datetime.now(timezone.utc),
+            )
+            self.db.add(statement)
+            self.db.flush()
+        created = 0
+        for item in parsed:
+            exists = self.db.scalar(
+                select(BankTransaction.id).where(
+                    BankTransaction.company_id == company_id,
+                    BankTransaction.reference_number == item.reference_number,
+                )
+            )
+            if exists is not None:
+                continue
+            self.db.add(
+                BankTransaction(
+                    id=uuid4(),
+                    company_id=company_id,
+                    bank_statement_id=statement.id,
+                    transaction_date=item.transaction_date,
+                    description=item.description,
+                    reference_number=item.reference_number,
+                    debit=item.debit,
+                    credit=item.credit,
+                    balance=item.balance,
+                    reconciliation_status=ReconciliationStatus.unmatched,
+                )
+            )
+            created += 1
+        self.db.commit()
+        return created
+
+    def load_existing_demo_company(self, user_id: UUID) -> DemoSeedResult | None:
+        company = self.db.scalar(
+            select(Company)
+            .join(CompanyMember, CompanyMember.company_id == Company.id)
+            .where(
+                CompanyMember.profile_id == user_id,
+                Company.legal_name == DEMO_COMPANY_NAME,
+                CompanyMember.status == MembershipStatus.active,
+            )
+        )
+        if company is None:
+            company = self.db.scalar(select(Company).where(Company.legal_name == DEMO_COMPANY_NAME))
+        if company is None:
+            return None
+        return DemoSeedResult(
+            company.id,
+            company.legal_name,
+            int(self.db.scalar(select(func.count(Ledger.id)).where(Ledger.company_id == company.id)) or 0),
+            int(self.db.scalar(select(func.count(Voucher.id)).where(Voucher.company_id == company.id)) or 0),
+            int(self.db.scalar(select(func.count(Invoice.id)).where(Invoice.company_id == company.id)) or 0),
+            int(
+                self.db.scalar(
+                    select(func.count(BankTransaction.id)).where(BankTransaction.company_id == company.id)
+                )
+                or 0
+            ),
+            seeded=False,
+            reused=True,
+        )
 
     def ensure_local_demo_identity(self, user_id: UUID) -> None:
         if user_id != UUID("00000000-0000-0000-0000-000000000001"):

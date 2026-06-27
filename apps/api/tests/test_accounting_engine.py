@@ -236,6 +236,8 @@ def test_client_demo_workspace_route_returns_200_when_enabled() -> None:
     try:
         response = client.post("/api/demo/client-workspace")
         body = response.json()
+        repeated_response = client.post("/api/demo/client-workspace")
+        repeated_body = repeated_response.json()
         dashboard = client.get(
             f"/companies/{body['company_id']}/reports/dashboard",
             headers=AUTH_HEADERS,
@@ -248,11 +250,18 @@ def test_client_demo_workspace_route_returns_200_when_enabled() -> None:
     assert body["success"] is True
     assert body["mode"] == "client_demo"
     assert body["company_name"] == "ABHAY Client Demo Workspace"
+    assert body["seeded"] is True
+    assert body["reused"] is False
     assert body["user"] == {
         "name": "Client Demo User",
         "email": "demo@abhay.local",
         "role": "owner",
     }
+    assert repeated_response.status_code == 200
+    assert repeated_body["success"] is True
+    assert repeated_body["company_id"] == body["company_id"]
+    assert repeated_body["seeded"] is False
+    assert repeated_body["reused"] is True
     assert dashboard["revenue"] == "50000.00"
     assert dashboard["expenses"] == "20000.00"
     assert dashboard["cash_position"] == "35400.00"

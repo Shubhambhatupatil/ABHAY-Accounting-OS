@@ -40,6 +40,7 @@ def create_alpha_schema_if_needed() -> None:
     if (
         settings.app_env != "local"
         and not settings.alpha_demo_mode
+        and not settings.client_demo_mode
         and not is_sqlite_database_url(settings.database_url)
     ):
         return

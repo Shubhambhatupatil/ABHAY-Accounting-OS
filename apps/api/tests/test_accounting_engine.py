@@ -286,6 +286,31 @@ def test_client_demo_workspace_route_returns_403_when_disabled() -> None:
     assert response.json()["detail"] == "Client Demo Mode is disabled."
 
 
+def test_client_demo_diagnostics_checks_database_write_path() -> None:
+    with_isolated_database()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        app_env="production",
+        client_demo_mode=True,
+        supabase_url="https://example.supabase.co",
+        database_url="sqlite://",
+    )
+    try:
+        response = client.get("/api/demo/diagnostics")
+        body = response.json()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 200
+    assert body["client_demo_mode"] is True
+    assert body["checks"]["database_connection"]["ok"] is True
+    assert body["checks"]["required_tables_exist"]["ok"] is True
+    assert body["checks"]["companies_table_insert"]["ok"] is True
+    assert body["checks"]["ledgers_table_insert"]["ok"] is True
+    assert body["checks"]["vouchers_table_insert"]["ok"] is True
+    assert body["checks"]["journal_lines_table_insert"]["ok"] is True
+
+
 def test_voucher_create_persists_posting_rows() -> None:
     with_isolated_database()
     try:

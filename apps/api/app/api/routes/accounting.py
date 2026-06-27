@@ -1,9 +1,9 @@
 import csv
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from io import StringIO
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, inspect, select, text
@@ -20,6 +20,8 @@ from app.models.accounting import (
     AiLog,
     AuditLog,
     BankTransaction,
+    Company,
+    CompanyMember,
     DocumentAiLog,
     Invoice,
     InvoiceLine,
@@ -28,9 +30,14 @@ from app.models.accounting import (
     JournalEntry,
     Ledger,
     LedgerCategory,
+    LedgerGroup,
     GstSupplyType,
+    Profile,
+    Role,
     Voucher,
     VoucherType,
+    MembershipStatus,
+    VoucherStatus,
 )
 from app.repositories.accounting import AccountingRepository
 from app.schemas.accounting import (
@@ -344,41 +351,49 @@ def create_client_demo_workspace(
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ) -> dict:
-    logger.info("Client demo workspace step started: loading settings")
+    logger.info("client_demo_seed_step_start", extra={"step": "loading settings"})
     if not settings.client_demo_mode:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Client Demo Mode is disabled.",
         )
-    logger.info("Client demo workspace step completed: loading settings")
+    logger.info("client_demo_seed_step_complete", extra={"step": "loading settings"})
     demo_user_id = UUID("00000000-0000-0000-0000-000000000001")
     try:
         repo = AccountingRepository(db)
         result = repo.create_demo_company(demo_user_id, "demo@abhay.local", "Client Demo User")
     except SQLAlchemyError as exc:
-        logger.exception("Client demo workspace database preparation failed")
         db.rollback()
-        fallback = AccountingRepository(db).load_existing_demo_company(demo_user_id)
-        if fallback is not None:
-            logger.warning("Client demo workspace reused existing data after seed failure", exc_info=exc)
-            result = fallback
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Client Demo Workspace could not be prepared. Please retry.",
-            ) from exc
+        logger.exception(
+            "client_demo_workspace_failed",
+            extra={
+                "step": "preparing workspace",
+                "error_type": type(exc).__name__,
+                "client_demo_mode": settings.client_demo_mode,
+                "demo_user_id": str(demo_user_id),
+                "database_kind": "sqlite" if settings.database_url.startswith("sqlite") else "postgres",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Client Demo Workspace could not be prepared. Please retry.",
+        ) from exc
     except Exception as exc:
-        logger.exception("Client demo workspace preparation failed")
         db.rollback()
-        fallback = AccountingRepository(db).load_existing_demo_company(demo_user_id)
-        if fallback is not None:
-            logger.warning("Client demo workspace reused existing data after unexpected seed failure", exc_info=exc)
-            result = fallback
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Client Demo Workspace could not be prepared. Please retry.",
-            ) from exc
+        logger.exception(
+            "client_demo_workspace_failed",
+            extra={
+                "step": "preparing workspace",
+                "error_type": type(exc).__name__,
+                "client_demo_mode": settings.client_demo_mode,
+                "demo_user_id": str(demo_user_id),
+                "database_kind": "sqlite" if settings.database_url.startswith("sqlite") else "postgres",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Client Demo Workspace could not be prepared. Please retry.",
+        ) from exc
     return {
         "success": True,
         "mode": "client_demo",
@@ -391,6 +406,180 @@ def create_client_demo_workspace(
             "email": "demo@abhay.local",
             "role": "owner",
         },
+    }
+
+
+@router.get("/api/demo/diagnostics")
+def client_demo_diagnostics(
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not settings.client_demo_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Client Demo diagnostics are disabled.",
+        )
+    checks: dict[str, dict[str, object]] = {}
+
+    def record(name: str, passed: bool, detail: str | None = None) -> None:
+        checks[name] = {"ok": passed, "detail": detail or ("pass" if passed else "fail")}
+
+    def run_check(name: str, action) -> None:
+        try:
+            action()
+            record(name, True)
+        except Exception as exc:
+            logger.exception("client_demo_diagnostics_check_failed", extra={"check": name})
+            db.rollback()
+            record(name, False, f"{type(exc).__name__}: {exc}")
+
+    required_tables = [
+        "profiles",
+        "roles",
+        "companies",
+        "company_members",
+        "ledger_groups",
+        "ledgers",
+        "vouchers",
+        "journal_entries",
+        "accounting_entries",
+        "invoices",
+        "invoice_lines",
+        "bank_accounts",
+        "bank_statements",
+        "bank_transactions",
+        "audit_logs",
+    ]
+
+    run_check("database_connection", lambda: db.execute(text("select 1")).scalar_one())
+
+    def check_required_tables() -> None:
+        if db.bind is None:
+            raise RuntimeError("Database bind is unavailable.")
+        inspector = inspect(db.bind)
+        missing = [table for table in required_tables if not inspector.has_table(table)]
+        if missing:
+            raise RuntimeError(f"Missing tables: {', '.join(missing)}")
+
+    run_check("required_tables_exist", check_required_tables)
+
+    diagnostic_id = uuid4()
+    company_id = uuid4()
+    role_id = uuid4()
+    group_id = uuid4()
+    ledger_id = uuid4()
+    voucher_id = uuid4()
+    journal_entry_id = uuid4()
+
+    def insert_company_graph() -> None:
+        db.add(Profile(id=diagnostic_id, full_name="Client Demo Diagnostics", email="diagnostics@abhay.local"))
+        db.add(Role(id=role_id, code=f"diagnostics-{diagnostic_id}", name="Diagnostics", description="Diagnostics role"))
+        db.add(
+            Company(
+                id=company_id,
+                legal_name="ABHAY Diagnostics Company",
+                trade_name="ABHAY Diagnostics Company",
+                gstin=None,
+                state_code="27",
+                created_by=diagnostic_id,
+            )
+        )
+        db.add(
+            CompanyMember(
+                id=uuid4(),
+                company_id=company_id,
+                profile_id=diagnostic_id,
+                role_id=role_id,
+                status=MembershipStatus.active,
+            )
+        )
+        db.flush()
+
+    def insert_ledger_graph() -> None:
+        db.add(
+            LedgerGroup(
+                id=group_id,
+                company_id=company_id,
+                name="Diagnostics Assets",
+                account_nature=AccountNature.asset,
+                parent_id=None,
+                is_system=True,
+            )
+        )
+        db.add(
+            Ledger(
+                id=ledger_id,
+                company_id=company_id,
+                ledger_group_id=group_id,
+                name="Diagnostics Bank",
+                category=LedgerCategory.bank,
+                account_nature=AccountNature.asset,
+                opening_balance=Decimal("0.00"),
+                opening_balance_type="dr",
+                gstin=None,
+                state_code=None,
+                is_system=True,
+                is_active=True,
+            )
+        )
+        db.flush()
+
+    def insert_voucher_graph() -> None:
+        db.add(
+            Voucher(
+                id=voucher_id,
+                company_id=company_id,
+                voucher_number=f"DIAG-{diagnostic_id}",
+                voucher_type=VoucherType.journal,
+                voucher_date=date.today(),
+                status=VoucherStatus.posted,
+                narration="Client demo diagnostics voucher",
+                source="diagnostics",
+                created_by=diagnostic_id,
+                approved_by=diagnostic_id,
+                posted_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db.flush()
+
+    def insert_journal_line() -> None:
+        db.add(
+            JournalEntry(
+                id=journal_entry_id,
+                company_id=company_id,
+                voucher_id=voucher_id,
+                ledger_id=ledger_id,
+                line_number=1,
+                debit=Decimal("1.00"),
+                credit=Decimal("0.00"),
+                narration="Client demo diagnostics journal line",
+            )
+        )
+        db.flush()
+
+    run_check("companies_table_insert", insert_company_graph)
+    run_check("ledgers_table_insert", insert_ledger_graph)
+    run_check("vouchers_table_insert", insert_voucher_graph)
+    run_check("journal_lines_table_insert", insert_journal_line)
+
+    def check_migrations_status() -> None:
+        if db.bind is None:
+            raise RuntimeError("Database bind is unavailable.")
+        inspector = inspect(db.bind)
+        if not inspector.has_table("alembic_version"):
+            record("migrations_status", True, "alembic_version table not available")
+            return
+        versions = [row[0] for row in db.execute(text("select version_num from alembic_version")).all()]
+        record("migrations_status", True, ", ".join(versions) if versions else "no versions recorded")
+
+    check_migrations_status()
+    db.rollback()
+
+    return {
+        "client_demo_mode": settings.client_demo_mode,
+        "database_kind": "sqlite" if settings.database_url.startswith("sqlite") else "postgres",
+        "checks": checks,
     }
 
 

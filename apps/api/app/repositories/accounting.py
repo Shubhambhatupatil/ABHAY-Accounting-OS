@@ -1263,13 +1263,13 @@ class AccountingRepository:
         )
 
     def _client_demo_step(self, step: str, action):
-        logger.info("Client demo workspace step started: %s", step)
+        logger.info("client_demo_seed_step_start", extra={"step": step})
         try:
             result = action()
         except Exception:
-            logger.exception("Client demo workspace failed while %s", step)
+            logger.exception("client_demo_seed_step_failed", extra={"step": step})
             raise
-        logger.info("Client demo workspace step completed: %s", step)
+        logger.info("client_demo_seed_step_complete", extra={"step": step})
         return result
 
     def ensure_client_demo_company(self, user_id: UUID) -> tuple[Company, bool]:

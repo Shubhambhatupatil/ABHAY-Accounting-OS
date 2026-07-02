@@ -1,0 +1,1 @@
+package com.anvritai.abhay.api;import java.time.Instant;import java.util.*;public final class SearchDtos{private SearchDtos(){}public record SearchResult(String type,UUID id,String title,String subtitle,Instant updatedAt){}public record SearchResponse(String query,int limit,List<SearchResult> results){} }

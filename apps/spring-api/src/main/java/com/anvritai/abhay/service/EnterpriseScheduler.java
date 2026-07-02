@@ -1,0 +1,3 @@
+package com.anvritai.abhay.service;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;import org.springframework.scheduling.annotation.Scheduled;import org.springframework.stereotype.Component;
+@Component @ConditionalOnProperty(name="abhay.scheduler.enabled",havingValue="true",matchIfMissing=true) public class EnterpriseScheduler{private final AutomationService automation;private final BackgroundJobService jobs;public EnterpriseScheduler(AutomationService a,BackgroundJobService j){automation=a;jobs=j;}@Scheduled(fixedDelayString="${abhay.scheduler.poll-ms:60000}") public void poll(){automation.runDue();jobs.processDue();}}
